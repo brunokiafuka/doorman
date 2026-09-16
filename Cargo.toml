@@ -1,0 +1,32 @@
+[workspace]
+members = [
+    "crates/doorman-core",
+    "crates/doorman-daemon",
+    "crates/doorman-cli",
+    "apps/doorman-desktop",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+repository = "https://github.com/brunokiafuka/doorman"
+
+[workspace.dependencies]
+anyhow = "1.0"
+bytes = "1.10"
+chrono = { version = "0.4", features = ["serde"] }
+clap = { version = "4.5", features = ["derive"] }
+dirs = "6.0"
+http-body-util = "0.1"
+hyper = { version = "1.7", features = ["client", "http1", "http2", "server"] }
+hyper-util = { version = "0.1", features = ["tokio", "server-auto", "http1", "http2"] }
+libc = "0.2"
+rcgen = { version = "0.14", default-features = false, features = ["crypto", "pem", "ring"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "2.0"
+tokio = { version = "1.47", features = ["full"] }

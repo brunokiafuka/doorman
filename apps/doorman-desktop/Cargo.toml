@@ -1,0 +1,26 @@
+[package]
+name = "doorman-desktop"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+build = "build.rs"
+
+[dependencies]
+anyhow.workspace = true
+chrono.workspace = true
+doorman-core = { path = "../../crates/doorman-core" }
+serde_json.workspace = true
+slint = "1.17"
+
+[build-dependencies]
+slint-build = "1.17"
+
+[package.metadata.bundle]
+name = "Doorman"
+identifier = "dev.doorman.desktop"
+icon = ["assets/doorman-tray.svg"]
+category = "Developer Tool"
+short_description = "Friendly names for local apps"
+long_description = "A small desktop companion for named localhost routes."
+copyright = "Copyright 2026 Doorman contributors"
+osx_minimum_system_version = "13.0"

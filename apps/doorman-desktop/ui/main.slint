@@ -1,0 +1,1763 @@
+import { ScrollView } from "std-widgets.slint";
+
+export struct RouteItem {
+    name: string,
+    url: string,
+    target: string,
+    port: int,
+    project: string,
+    pid: string,
+    created: string,
+    healthy: bool,
+    command: string,
+    requests: int,
+    errors: int,
+    last-seen: string,
+    avg-latency: string,
+}
+
+export struct DomainItem {
+    name: string,
+    builtin: bool,
+    // ready | setup | conflict
+    status: string,
+}
+
+export struct TrafficItem {
+    id: int,
+    route: string,
+    host: string,
+    method: string,
+    path: string,
+    url: string,
+    status: int,
+    duration: string,
+    size: string,
+    request-size: string,
+    response-size: string,
+    time: string,
+    full-time: string,
+    curl: string,
+}
+
+global Theme {
+    out property <color> bg: #0a0a0a;
+    out property <color> surface: #111111;
+    out property <color> raised: #171717;
+    out property <color> border: #232323;
+    out property <color> border-subtle: #1a1a1a;
+    out property <color> border-strong: #333333;
+    out property <color> row-hover: #141414;
+    out property <color> row-selected: #1b1a24;
+    out property <color> text: #ededed;
+    out property <color> text-secondary: #a1a1a1;
+    out property <color> text-tertiary: #6b6b6b;
+    out property <color> accent: #8e7cf8;
+    out property <color> accent-soft: #221f38;
+    out property <color> green: #3ecf8e;
+    out property <color> blue: #52a8ff;
+    out property <color> amber: #f5a524;
+    out property <color> red: #ff6166;
+    out property <string> mono: "Menlo";
+
+    public pure function method-color(method: string) -> color {
+        if method == "GET" { return self.blue; }
+        if method == "POST" { return self.green; }
+        if method == "PUT" || method == "PATCH" { return self.amber; }
+        if method == "DELETE" { return self.red; }
+        return self.text-secondary;
+    }
+
+    public pure function status-color(status: int) -> color {
+        if status >= 500 { return self.red; }
+        if status >= 400 { return self.amber; }
+        if status >= 300 { return self.blue; }
+        return self.green;
+    }
+}
+
+global Icons {
+    out property <string> globe: "M2.5 8a5.5 5.5 0 1 0 11 0a5.5 5.5 0 1 0-11 0 M2.5 8h11 M8 2.5c1.6 1.5 2.4 3.3 2.4 5.5S9.6 12 8 13.5C6.4 12 5.6 10.2 5.6 8S6.4 4 8 2.5";
+    out property <string> check: "M3.5 8.5l3 3 6-7";
+    out property <string> door: "M4 14V2.75A.75.75 0 0 1 4.75 2h6.5a.75.75 0 0 1 .75.75V14 M2 14h12 M9.25 8h.5";
+    out property <string> plus: "M8 3.5v9 M3.5 8h9";
+    out property <string> refresh: "M13 8a5 5 0 1 1-1.46-3.54 M13 2.5v2.5h-2.5";
+    out property <string> pause: "M5.75 3.5v9 M10.25 3.5v9";
+    out property <string> play: "M5 3.5l7 4.5-7 4.5z";
+    out property <string> clear: "M3 8a5 5 0 1 0 10 0a5 5 0 1 0-10 0 M4.5 4.5l7 7";
+    out property <string> external: "M9.5 2.5h4v4 M13.5 2.5l-6 6 M11.5 9.5v4h-9v-9h4";
+    out property <string> copy: "M5.5 5.5h8v8h-8z M2.5 10.5v-8h8";
+    out property <string> close: "M4 4l8 8 M12 4l-8 8";
+    out property <string> search: "M2.5 7a4.5 4.5 0 1 0 9 0a4.5 4.5 0 1 0-9 0 M10.5 10.5l3 3";
+    out property <string> edit: "M10.5 2.5l3 3-8 8h-3v-3z";
+    out property <string> trash: "M2.5 4.5h11 M6 4.5v-2h4v2 M4 4.5l.75 9h6.5l.75-9";
+    out property <string> arrow: "M2.5 8h11 M9.5 4l4 4-4 4";
+    out property <string> arrow-up: "M8 13V3 M4 7l4-4 4 4";
+    out property <string> route: "M4 4a1.5 1.5 0 1 0 0 .01 M12 12a1.5 1.5 0 1 0 0 .01 M4 5.5v2.5a2 2 0 0 0 2 2h4a2 2 0 0 1 2 2v-1.5";
+}
+
+component Icon inherits Path {
+    in property <string> glyph;
+    in property <color> tint: Theme.text-secondary;
+    in property <bool> filled: false;
+    width: 14px;
+    height: 14px;
+    viewbox-width: 16;
+    viewbox-height: 16;
+    commands: glyph;
+    stroke: tint;
+    stroke-width: 1.5px;
+    fill: filled ? tint : transparent;
+}
+
+component Button inherits Rectangle {
+    in property <string> label;
+    in property <string> icon;
+    // primary | secondary | ghost | danger
+    in property <string> kind: "secondary";
+    in property <bool> enabled: true;
+    callback activated;
+
+    height: 30px;
+    horizontal-stretch: 0;
+    border-radius: 6px;
+    border-width: kind == "secondary" || kind == "danger" ? 1px : 0;
+    border-color: kind == "danger" ? (touch.has-hover ? #5c2a2c : #3a2324) : (touch.has-hover ? Theme.border-strong : Theme.border);
+    background: kind == "primary" ? (touch.pressed ? #cfcfcf : touch.has-hover ? #ffffff : #ededed)
+        : kind == "danger" ? (touch.has-hover ? #2a1415 : transparent)
+        : touch.pressed ? #222 : touch.has-hover ? #1c1c1c : kind == "ghost" ? transparent : Theme.surface;
+    opacity: enabled ? 1 : 0.4;
+    animate background, border-color { duration: 120ms; }
+
+    property <color> fg: kind == "primary" ? #0a0a0a : kind == "danger" ? Theme.red : Theme.text;
+
+    HorizontalLayout {
+        padding-left: label == "" ? 8px : 11px;
+        padding-right: label == "" ? 8px : 12px;
+        spacing: 6px;
+        alignment: center;
+        if icon != "" : VerticalLayout {
+            alignment: center;
+            Icon { glyph: root.icon; tint: root.fg; }
+        }
+        if label != "" : Text {
+            text: root.label;
+            color: root.fg;
+            font-size: 12px;
+            font-weight: 500;
+            vertical-alignment: center;
+        }
+    }
+
+    touch := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: pointer;
+        clicked => { root.activated(); }
+    }
+}
+
+component Tab inherits Rectangle {
+    in property <string> label;
+    in property <int> count;
+    in property <bool> show-count: true;
+    in property <bool> active;
+    callback activated;
+    horizontal-stretch: 0;
+
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 12px;
+        spacing: 7px;
+        alignment: center;
+        Text {
+            text: root.label;
+            color: root.active ? Theme.text : touch.has-hover ? Theme.text : Theme.text-secondary;
+            font-size: 13px;
+            font-weight: root.active ? 500 : 400;
+            vertical-alignment: center;
+        }
+        if root.show-count : VerticalLayout {
+            alignment: center;
+            Rectangle {
+                height: 18px;
+                border-radius: 9px;
+                background: root.active ? Theme.accent-soft : #1c1c1c;
+                HorizontalLayout {
+                    padding-left: 6px;
+                    padding-right: 6px;
+                    Text {
+                        text: root.count;
+                        color: root.active ? Theme.accent : Theme.text-tertiary;
+                        font-size: 11px;
+                        font-family: Theme.mono;
+                        vertical-alignment: center;
+                        horizontal-alignment: center;
+                    }
+                }
+            }
+        }
+    }
+
+    Rectangle {
+        y: parent.height - 2px;
+        height: 2px;
+        x: 8px;
+        width: parent.width - 16px;
+        border-radius: 1px;
+        background: root.active ? Theme.accent : transparent;
+    }
+
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.activated(); }
+    }
+}
+
+component Chip inherits Rectangle {
+    in property <string> label;
+    in property <bool> active;
+    in property <bool> mono: false;
+    callback activated;
+
+    height: 26px;
+    horizontal-stretch: 0;
+    border-radius: 13px;
+    border-width: 1px;
+    border-color: active ? #3b3460 : touch.has-hover ? Theme.border-strong : Theme.border;
+    background: active ? Theme.accent-soft : touch.has-hover ? #161616 : transparent;
+    animate background, border-color { duration: 120ms; }
+
+    HorizontalLayout {
+        padding-left: 10px;
+        padding-right: 10px;
+        Text {
+            text: root.label;
+            color: root.active ? #cfc6ff : Theme.text-secondary;
+            font-size: 12px;
+            font-family: root.mono ? Theme.mono : "";
+            vertical-alignment: center;
+        }
+    }
+
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.activated(); }
+    }
+}
+
+component MethodBadge inherits Text {
+    in property <string> method;
+    text: method;
+    color: Theme.method-color(method);
+    font-size: 11px;
+    font-weight: 600;
+    font-family: Theme.mono;
+    vertical-alignment: center;
+}
+
+component Dot inherits Rectangle {
+    in property <color> tint;
+    width: 8px;
+    height: 8px;
+    border-radius: 4px;
+    background: tint;
+    Rectangle {
+        width: 14px;
+        height: 14px;
+        border-radius: 7px;
+        background: root.tint.with-alpha(0.18);
+    }
+}
+
+component HeaderCell inherits Text {
+    color: Theme.text-tertiary;
+    font-size: 11px;
+    font-weight: 500;
+    vertical-alignment: center;
+    overflow: elide;
+}
+
+component Property inherits HorizontalLayout {
+    in property <string> key;
+    in property <string> value;
+    in property <bool> mono: true;
+    in property <color> tint: Theme.text;
+    height: 30px;
+    spacing: 12px;
+    Text {
+        width: 104px;
+        text: root.key;
+        color: Theme.text-tertiary;
+        font-size: 12px;
+        vertical-alignment: center;
+    }
+    Text {
+        horizontal-stretch: 1;
+        text: root.value == "" ? "—" : root.value;
+        color: root.value == "" ? Theme.text-tertiary : root.tint;
+        font-size: 12px;
+        font-family: root.mono ? Theme.mono : "";
+        vertical-alignment: center;
+        overflow: elide;
+    }
+}
+
+component SectionTitle inherits Text {
+    color: Theme.text-tertiary;
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.4px;
+}
+
+component Input inherits Rectangle {
+    in-out property <string> text;
+    in property <string> placeholder;
+    in property <string> prefix;
+    in property <string> suffix;
+    in property <bool> mono: true;
+    callback edited(string);
+    callback accepted;
+
+    height: 36px;
+    border-radius: 6px;
+    border-width: 1px;
+    border-color: input.has-focus ? #5a4fa8 : touch.has-hover ? Theme.border-strong : Theme.border;
+    background: Theme.bg;
+    animate border-color { duration: 120ms; }
+
+    public function focus-input() { input.focus(); }
+
+    touch := TouchArea {
+        mouse-cursor: MouseCursor.text;
+        clicked => { input.focus(); }
+    }
+
+    HorizontalLayout {
+        padding-left: 10px;
+        padding-right: 10px;
+        spacing: 0px;
+        if root.prefix != "" : Text {
+            text: root.prefix;
+            color: Theme.text-tertiary;
+            font-size: 13px;
+            font-family: Theme.mono;
+            vertical-alignment: center;
+        }
+        Rectangle {
+            horizontal-stretch: 1;
+            Text {
+                x: 0;
+                width: parent.width;
+                visible: root.text == "";
+                text: root.placeholder;
+                color: #4a4a4a;
+                font-size: 13px;
+                font-family: root.mono ? Theme.mono : "";
+                vertical-alignment: center;
+                overflow: elide;
+            }
+            input := TextInput {
+                text <=> root.text;
+                single-line: true;
+                color: Theme.text;
+                selection-background-color: #3b3460;
+                font-size: 13px;
+                font-family: root.mono ? Theme.mono : "";
+                vertical-alignment: center;
+                edited => { root.edited(self.text); }
+                accepted => { root.accepted(); }
+            }
+        }
+        if root.suffix != "" : Text {
+            text: root.suffix;
+            color: Theme.text-tertiary;
+            font-size: 13px;
+            font-family: Theme.mono;
+            vertical-alignment: center;
+        }
+    }
+}
+
+component Divider inherits Rectangle {
+    height: 1px;
+    background: Theme.border-subtle;
+}
+
+component EmptyState inherits VerticalLayout {
+    in property <string> icon;
+    in property <string> title;
+    in property <string> body;
+    alignment: center;
+    spacing: 6px;
+    HorizontalLayout {
+        alignment: center;
+        padding-bottom: 8px;
+        Rectangle {
+            width: 40px;
+            height: 40px;
+            border-radius: 10px;
+            border-width: 1px;
+            border-color: Theme.border;
+            background: Theme.surface;
+            Icon { glyph: root.icon; width: 18px; height: 18px; tint: Theme.text-secondary; }
+        }
+    }
+    Text { text: root.title; color: Theme.text; font-size: 14px; font-weight: 500; horizontal-alignment: center; }
+    Text { text: root.body; color: Theme.text-tertiary; font-size: 12px; horizontal-alignment: center; wrap: word-wrap; }
+    @children
+}
+
+component CodeHint inherits Rectangle {
+    in property <string> code;
+    height: 32px;
+    border-radius: 6px;
+    border-width: 1px;
+    border-color: Theme.border;
+    background: Theme.surface;
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 12px;
+        spacing: 8px;
+        Text { text: "$"; color: Theme.text-tertiary; font-size: 12px; font-family: Theme.mono; vertical-alignment: center; }
+        Text { text: root.code; color: Theme.text-secondary; font-size: 12px; font-family: Theme.mono; vertical-alignment: center; }
+    }
+}
+
+component RouteRow inherits Rectangle {
+    in property <RouteItem> route;
+    in property <bool> selected;
+    callback activated;
+
+    height: 44px;
+    background: selected ? Theme.row-selected : touch.has-hover ? Theme.row-hover : transparent;
+
+    HorizontalLayout {
+        padding-left: 20px;
+        padding-right: 20px;
+        spacing: 16px;
+        HorizontalLayout {
+            horizontal-stretch: 1;
+            spacing: 12px;
+            VerticalLayout {
+                alignment: center;
+                Dot { tint: root.route.healthy ? Theme.green : Theme.amber; }
+            }
+            HorizontalLayout {
+                horizontal-stretch: 1;
+                spacing: 0px;
+            Text {
+                text: root.route.name;
+                color: Theme.text;
+                font-size: 13px;
+                font-weight: 500;
+                vertical-alignment: center;
+            }
+            Text {
+                horizontal-stretch: 1;
+                text: ".localhost";
+                color: Theme.text-tertiary;
+                font-size: 13px;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+            }
+        }
+        Text { width: 120px; text: root.route.target; color: Theme.text-secondary; font-size: 12px; font-family: Theme.mono; vertical-alignment: center; overflow: elide; }
+        Text { width: 72px; text: root.route.requests; color: root.route.requests == 0 ? Theme.text-tertiary : Theme.text-secondary; font-size: 12px; font-family: Theme.mono; vertical-alignment: center; horizontal-alignment: right; }
+        Text { width: 92px; text: root.route.last-seen == "" ? "—" : root.route.last-seen; color: Theme.text-tertiary; font-size: 12px; vertical-alignment: center; horizontal-alignment: right; overflow: elide; }
+    }
+
+    Rectangle { y: parent.height - 1px; height: 1px; background: Theme.border-subtle; }
+    if root.selected : Rectangle { x: 0; width: 2px; background: Theme.accent; }
+
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.activated(); }
+    }
+}
+
+component TrafficRow inherits Rectangle {
+    in property <TrafficItem> request;
+    in property <bool> selected;
+    in property <bool> compact;
+    callback activated;
+
+    height: 34px;
+    background: selected ? Theme.row-selected : touch.has-hover ? Theme.row-hover : transparent;
+
+    HorizontalLayout {
+        padding-left: 20px;
+        padding-right: 20px;
+        spacing: 14px;
+        Text { width: 64px; text: root.request.time; color: Theme.text-tertiary; font-size: 12px; font-family: Theme.mono; vertical-alignment: center; }
+        MethodBadge { width: 52px; method: root.request.method; }
+        Text { width: 110px; text: root.request.route; color: Theme.text-secondary; font-size: 12px; vertical-alignment: center; overflow: elide; }
+        Text { horizontal-stretch: 1; text: root.request.path; color: Theme.text; font-size: 12px; font-family: Theme.mono; vertical-alignment: center; overflow: elide; }
+        Text { width: 36px; text: root.request.status; color: Theme.status-color(root.request.status); font-size: 12px; font-weight: 500; font-family: Theme.mono; vertical-alignment: center; }
+        Text { width: 56px; text: root.request.duration; color: Theme.text-secondary; font-size: 12px; font-family: Theme.mono; vertical-alignment: center; horizontal-alignment: right; }
+        if !root.compact : Text { width: 64px; text: root.request.size; color: Theme.text-tertiary; font-size: 12px; font-family: Theme.mono; vertical-alignment: center; horizontal-alignment: right; }
+    }
+
+    Rectangle { y: parent.height - 1px; height: 1px; background: Theme.border-subtle; }
+    if root.selected : Rectangle { x: 0; width: 2px; background: Theme.accent; }
+
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.activated(); }
+    }
+}
+
+export component MainWindow inherits Window {
+    title: "Doorman";
+    preferred-width: 1120px;
+    preferred-height: 720px;
+    min-width: 880px;
+    min-height: 540px;
+    background: Theme.bg;
+    default-font-size: 13px;
+
+    // Daemon state
+    in property <bool> daemon-online: false;
+    in property <string> status-detail: "Looking for the Doorman daemon…";
+    in property <int> proxy-port: 3210;
+    // e.g. "https://" and ":3443" (empty on 443)
+    in property <string> url-scheme: "http://";
+    in property <string> url-port-suffix: ":3210";
+    in property <string> listen-label: ":3210";
+    in property <bool> https-enabled;
+    in property <bool> ca-trusted;
+    in property <bool> trusting;
+    in property <bool> wildcard;
+    in property <string> version: "0.1.0";
+
+    // Routes
+    in property <[RouteItem]> routes;
+    in property <int> route-total;
+    in property <[string]> route-names;
+    in property <[TrafficItem]> route-traffic;
+    in-out property <string> route-query;
+    in-out property <bool> has-selected-route;
+    in-out property <RouteItem> selected-route;
+
+    // Route form: "" | "create" | "edit"
+    in-out property <string> form-mode;
+    in-out property <string> form-original;
+    in-out property <string> form-name;
+    in-out property <string> form-port;
+    in-out property <string> form-project;
+    in-out property <string> form-error;
+    in property <[int]> detected-ports;
+
+    // Traffic
+    in property <[TrafficItem]> traffic;
+    in property <int> traffic-total;
+    in property <int> pending-count;
+    in-out property <bool> paused;
+    in-out property <string> traffic-route-filter;
+    // all | ok | errors
+    in-out property <string> traffic-status-filter: "all";
+    in-out property <bool> has-selected-request;
+    in-out property <TrafficItem> selected-request;
+    in-out property <int> detail-tab;
+
+    // Domains (always starts with the built-in "localhost")
+    in property <[DomainItem]> domains;
+    in property <bool> dns-running: true;
+    in-out property <string> domain-draft;
+    in-out property <string> domain-error;
+    in property <string> verifying-domain;
+    in property <bool> setting-up-domains;
+
+    // Shell
+    in-out property <int> current-tab;
+    in property <string> toast;
+
+    callback refresh;
+    callback filters-changed;
+    callback open-url(string);
+    callback copy-text(string, string);
+    callback remove-route(string);
+    callback save-route() -> bool;
+    callback scan-ports;
+    callback clear-traffic;
+    callback resume;
+    callback replay-request(TrafficItem);
+    callback add-domain() -> bool;
+    callback setup-domains;
+    callback trust-ca;
+    callback set-wildcard(bool);
+    callback remove-domain(string);
+    callback verify-domain(string);
+    in property <bool> replaying;
+
+    function begin-create() {
+        root.form-mode = "create";
+        root.form-original = "";
+        root.form-name = "";
+        root.form-port = "";
+        root.form-project = "";
+        root.form-error = "";
+        root.scan-ports();
+    }
+
+    function begin-edit() {
+        root.form-mode = "edit";
+        root.form-original = root.selected-route.name;
+        root.form-name = root.selected-route.name;
+        root.form-port = root.selected-route.port;
+        root.form-project = root.selected-route.project;
+        root.form-error = "";
+        root.scan-ports();
+    }
+
+    pure function port-suffix() -> string {
+        return root.url-port-suffix;
+    }
+
+    function show-route-traffic(name: string) {
+        root.traffic-route-filter = name;
+        root.has-selected-request = false;
+        root.current-tab = 1;
+        root.filters-changed();
+    }
+
+    VerticalLayout {
+        // ── Top bar ────────────────────────────────────────────────
+        Rectangle {
+            height: 48px;
+            background: Theme.bg;
+            HorizontalLayout {
+                padding-left: 16px;
+                padding-right: 12px;
+                spacing: 4px;
+
+                HorizontalLayout {
+                    horizontal-stretch: 0;
+                    spacing: 10px;
+                    padding-right: 14px;
+                    VerticalLayout {
+                        alignment: center;
+                        Rectangle {
+                            width: 22px;
+                            height: 22px;
+                            border-radius: 6px;
+                            background: Theme.text;
+                            Icon { glyph: Icons.door; tint: Theme.bg; width: 14px; height: 14px; stroke-width: 1.75px; }
+                        }
+                    }
+                    Text { text: "Doorman"; color: Theme.text; font-size: 13px; font-weight: 600; vertical-alignment: center; }
+                    Text { text: "/"; color: Theme.border-strong; font-size: 18px; font-weight: 300; vertical-alignment: center; }
+                }
+
+                Tab {
+                    label: "Routes";
+                    count: root.route-total;
+                    active: root.current-tab == 0;
+                    activated => { root.current-tab = 0; }
+                }
+                Tab {
+                    label: "Traffic";
+                    count: root.traffic-total;
+                    active: root.current-tab == 1;
+                    activated => { root.current-tab = 1; }
+                }
+                Tab {
+                    label: "Domains";
+                    count: root.domains.length;
+                    active: root.current-tab == 2;
+                    activated => { root.current-tab = 2; }
+                }
+
+                Rectangle { horizontal-stretch: 1; }
+
+                VerticalLayout {
+                    alignment: center;
+                    Rectangle {
+                        height: 26px;
+                        horizontal-stretch: 0;
+                        border-radius: 13px;
+                        border-width: 1px;
+                        border-color: Theme.border;
+                        HorizontalLayout {
+                            padding-left: 10px;
+                            padding-right: 11px;
+                            spacing: 8px;
+                            VerticalLayout {
+                                alignment: center;
+                                Dot { tint: root.daemon-online ? Theme.green : Theme.red; }
+                            }
+                            Text {
+                                text: root.daemon-online ? (root.https-enabled ? "HTTPS" : "HTTP") + (root.url-port-suffix == "" ? "" : " " + root.url-port-suffix) : "Daemon offline";
+                                color: Theme.text-secondary;
+                                font-size: 12px;
+                                vertical-alignment: center;
+                            }
+                        }
+                    }
+                }
+                Rectangle { width: 6px; }
+                VerticalLayout {
+                    alignment: center;
+                    Button { icon: Icons.refresh; kind: "ghost"; activated => { root.refresh(); } }
+                }
+            }
+            Rectangle { y: parent.height - 1px; height: 1px; background: Theme.border; }
+        }
+
+        if root.daemon-online && root.https-enabled && !root.ca-trusted : Rectangle {
+            height: 44px;
+            background: #1a1508;
+            HorizontalLayout {
+                padding-left: 20px;
+                padding-right: 12px;
+                spacing: 10px;
+                VerticalLayout { alignment: center; Dot { tint: Theme.amber; } }
+                Text {
+                    horizontal-stretch: 1;
+                    text: "Doorman's HTTPS certificate isn't trusted yet, so browsers will show a warning.";
+                    color: #e8c47a;
+                    font-size: 12px;
+                    vertical-alignment: center;
+                    overflow: elide;
+                }
+                VerticalLayout {
+                    alignment: center;
+                    Button {
+                        label: root.trusting ? "Waiting for approval…" : "Trust certificate";
+                        kind: "primary";
+                        enabled: !root.trusting;
+                        activated => { root.trust-ca(); }
+                    }
+                }
+            }
+            Rectangle { y: parent.height - 1px; height: 1px; background: #3a2e12; }
+        }
+
+        // ── Content ────────────────────────────────────────────────
+        Rectangle {
+            vertical-stretch: 1;
+
+            if !root.daemon-online : EmptyState {
+                icon: Icons.clear;
+                title: "Doorman isn't running";
+                body: root.status-detail;
+                HorizontalLayout {
+                    alignment: center;
+                    padding-top: 12px;
+                    Button { label: "Try again"; icon: Icons.refresh; activated => { root.refresh(); } }
+                }
+            }
+
+            // ── Routes tab ─────────────────────────────────────────
+            if root.daemon-online && root.current-tab == 0 : HorizontalLayout {
+                VerticalLayout {
+                    horizontal-stretch: 1;
+
+                    // Toolbar
+                    HorizontalLayout {
+                        height: 56px;
+                        padding-left: 20px;
+                        padding-right: 20px;
+                        spacing: 10px;
+                        VerticalLayout {
+                            alignment: center;
+                            Rectangle {
+                                width: 260px;
+                                height: 32px;
+                                border-radius: 6px;
+                                border-width: 1px;
+                                border-color: search.has-focus ? #5a4fa8 : Theme.border;
+                                background: Theme.surface;
+                                HorizontalLayout {
+                                    padding-left: 10px;
+                                    padding-right: 10px;
+                                    spacing: 8px;
+                                    VerticalLayout { alignment: center; Icon { glyph: Icons.search; tint: Theme.text-tertiary; } }
+                                    Rectangle {
+                                        horizontal-stretch: 1;
+                                        Text { x: 0; width: parent.width; visible: root.route-query == ""; text: "Filter routes…"; color: #4a4a4a; font-size: 13px; vertical-alignment: center; }
+                                        search := TextInput {
+                                            text <=> root.route-query;
+                                            single-line: true;
+                                            color: Theme.text;
+                                            font-size: 13px;
+                                            vertical-alignment: center;
+                                            edited => { root.filters-changed(); }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        Rectangle { horizontal-stretch: 1; }
+                        VerticalLayout {
+                            alignment: center;
+                            Button { label: "New route"; icon: Icons.plus; kind: "primary"; activated => { root.begin-create(); } }
+                        }
+                    }
+
+                    if root.route-total == 0 : EmptyState {
+                        vertical-stretch: 1;
+                        icon: Icons.route;
+                        title: "No routes yet";
+                        body: "Give a local dev server a friendly .localhost name.";
+                        HorizontalLayout {
+                            alignment: center;
+                            padding-top: 14px;
+                            Button { label: "New route"; icon: Icons.plus; kind: "primary"; activated => { root.begin-create(); } }
+                        }
+                        HorizontalLayout {
+                            alignment: center;
+                            padding-top: 10px;
+                            Text { text: "or from your terminal"; color: Theme.text-tertiary; font-size: 11px; }
+                        }
+                        HorizontalLayout {
+                            alignment: center;
+                            CodeHint { code: "doorman add web 5173"; }
+                        }
+                    }
+
+                    if root.route-total > 0 : VerticalLayout {
+                        vertical-stretch: 1;
+                        // Column header
+                        Rectangle {
+                            height: 32px;
+                            background: Theme.bg;
+                            HorizontalLayout {
+                                padding-left: 20px;
+                                padding-right: 20px;
+                                spacing: 16px;
+                                HeaderCell { horizontal-stretch: 1; text: "Name"; }
+                                HeaderCell { width: 120px; text: "Target"; }
+                                HeaderCell { width: 72px; text: "Requests"; horizontal-alignment: right; }
+                                HeaderCell { width: 92px; text: "Last request"; horizontal-alignment: right; }
+                            }
+                            Rectangle { y: 0; height: 1px; background: Theme.border-subtle; }
+                            Rectangle { y: parent.height - 1px; height: 1px; background: Theme.border-subtle; }
+                        }
+
+                        if root.routes.length == 0 : EmptyState {
+                            vertical-stretch: 1;
+                            icon: Icons.search;
+                            title: "No matching routes";
+                            body: "Nothing matches “\{root.route-query}”.";
+                        }
+
+                        if root.routes.length > 0 : ScrollView {
+                            vertical-stretch: 1;
+                            VerticalLayout {
+                                alignment: start;
+                                for route in root.routes : RouteRow {
+                                    route: route;
+                                    selected: root.has-selected-route && root.selected-route.name == route.name && root.form-mode != "create";
+                                    activated => {
+                                        root.selected-route = route;
+                                        root.has-selected-route = true;
+                                        root.form-mode = "";
+                                        root.filters-changed();
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // ── Route side panel ───────────────────────────────
+                if root.form-mode != "" || root.has-selected-route : Rectangle {
+                    width: 380px;
+                    background: Theme.bg;
+                    Rectangle { x: 0; width: 1px; background: Theme.border; }
+
+                    // Configure form
+                    if root.form-mode != "" : VerticalLayout {
+                        padding: 24px;
+                        padding-left: 25px;
+                        spacing: 18px;
+
+                        HorizontalLayout {
+                            VerticalLayout {
+                                spacing: 4px;
+                                horizontal-stretch: 1;
+                                Text { text: root.form-mode == "create" ? "New route" : "Configure route"; color: Theme.text; font-size: 15px; font-weight: 600; }
+                                Text { text: "Map a .localhost name to a port on this Mac."; color: Theme.text-tertiary; font-size: 12px; }
+                            }
+                            Button { icon: Icons.close; kind: "ghost"; activated => { root.form-mode = ""; } }
+                        }
+
+                        VerticalLayout {
+                            spacing: 7px;
+                            SectionTitle { text: "Name"; }
+                            name-input := Input {
+                                text <=> root.form-name;
+                                placeholder: "web";
+                                suffix: ".localhost";
+                                accepted => { port-input.focus-input(); }
+                            }
+                        }
+
+                        VerticalLayout {
+                            spacing: 7px;
+                            SectionTitle { text: "Port"; }
+                            port-input := Input {
+                                text <=> root.form-port;
+                                placeholder: "5173";
+                                prefix: "127.0.0.1:";
+                                accepted => { if root.save-route() { root.form-mode = ""; } }
+                            }
+                            if root.detected-ports.length > 0 : HorizontalLayout {
+                                spacing: 6px;
+                                alignment: start;
+                                Text { text: "Listening"; color: Theme.text-tertiary; font-size: 11px; vertical-alignment: center; }
+                                for port in root.detected-ports : Chip {
+                                    label: port;
+                                    mono: true;
+                                    active: root.form-port == "\{port}";
+                                    activated => { root.form-port = port; }
+                                }
+                            }
+                        }
+
+                        VerticalLayout {
+                            spacing: 7px;
+                            HorizontalLayout {
+                                height: 14px;
+                                SectionTitle { text: "Project"; horizontal-stretch: 1; }
+                                Text { text: "Optional"; color: #4a4a4a; font-size: 11px; }
+                            }
+                            Input {
+                                text <=> root.form-project;
+                                placeholder: "~/code/my-app";
+                                accepted => { if root.save-route() { root.form-mode = ""; } }
+                            }
+                        }
+
+                        // Preview
+                        Rectangle {
+                            vertical-stretch: 0;
+                            border-radius: 8px;
+                            border-width: 1px;
+                            border-color: Theme.border;
+                            background: Theme.surface;
+                            VerticalLayout {
+                                padding: 14px;
+                                spacing: 10px;
+                                SectionTitle { text: "Preview"; }
+                                for domain in root.domains : Text {
+                                    text: root.url-scheme + (root.form-name == "" ? "name" : root.form-name) + "." + domain.name + root.port-suffix();
+                                    color: root.form-name == "" ? Theme.text-tertiary : Theme.text;
+                                    font-size: 12px;
+                                    font-family: Theme.mono;
+                                    overflow: elide;
+                                }
+                                HorizontalLayout {
+                                    spacing: 8px;
+                                    VerticalLayout { alignment: center; Icon { glyph: Icons.arrow; tint: Theme.accent; width: 12px; height: 12px; } }
+                                    Text {
+                                        horizontal-stretch: 1;
+                                        text: "127.0.0.1:" + (root.form-port == "" ? "port" : root.form-port);
+                                        color: root.form-port == "" ? Theme.text-tertiary : Theme.text-secondary;
+                                        font-size: 12px;
+                                        font-family: Theme.mono;
+                                        overflow: elide;
+                                    }
+                                }
+                            }
+                        }
+
+                        if root.form-error != "" : Rectangle {
+                            vertical-stretch: 0;
+                            border-radius: 6px;
+                            border-width: 1px;
+                            border-color: #3a2324;
+                            background: #1a1011;
+                            HorizontalLayout {
+                                padding: 10px;
+                                Text { text: root.form-error; color: Theme.red; font-size: 12px; wrap: word-wrap; }
+                            }
+                        }
+
+                        Rectangle { vertical-stretch: 1; }
+
+                        HorizontalLayout {
+                            spacing: 8px;
+                            alignment: end;
+                            Button { label: "Cancel"; kind: "ghost"; activated => { root.form-mode = ""; } }
+                            Button {
+                                label: root.form-mode == "create" ? "Create route" : "Save changes";
+                                kind: "primary";
+                                enabled: root.form-name != "" && root.form-port != "";
+                                activated => { if root.save-route() { root.form-mode = ""; } }
+                            }
+                        }
+                    }
+
+                    // Route details
+                    if root.form-mode == "" && root.has-selected-route : VerticalLayout {
+                        padding: 24px;
+                        padding-left: 25px;
+                        spacing: 20px;
+
+                        HorizontalLayout {
+                            spacing: 10px;
+                            VerticalLayout {
+                                horizontal-stretch: 1;
+                                spacing: 6px;
+                                Text {
+                                    text: root.selected-route.name + ".localhost";
+                                    color: Theme.text;
+                                    font-size: 16px;
+                                    font-weight: 600;
+                                    overflow: elide;
+                                }
+                                HorizontalLayout {
+                                    spacing: 7px;
+                                    alignment: start;
+                                    VerticalLayout { alignment: center; Dot { tint: root.selected-route.healthy ? Theme.green : Theme.amber; } }
+                                    Text {
+                                        text: root.selected-route.healthy ? "Target is responding" : "Nothing listening on :\{root.selected-route.port}";
+                                        color: Theme.text-secondary;
+                                        font-size: 12px;
+                                    }
+                                }
+                            }
+                            Button { icon: Icons.close; kind: "ghost"; activated => { root.has-selected-route = false; } }
+                        }
+
+                        // One URL per domain
+                        VerticalLayout {
+                            spacing: 6px;
+                            for domain in root.domains : url-row := Rectangle {
+                                property <string> url: root.url-scheme + root.selected-route.name + "." + domain.name + root.port-suffix();
+                                height: 36px;
+                                border-radius: 6px;
+                                border-width: 1px;
+                                border-color: Theme.border;
+                                background: Theme.surface;
+                                HorizontalLayout {
+                                    padding-left: 12px;
+                                    padding-right: 3px;
+                                    spacing: 2px;
+                                    Text { horizontal-stretch: 1; text: url-row.url; color: domain.status == "ready" ? Theme.text : Theme.text-tertiary; font-size: 12px; font-family: Theme.mono; vertical-alignment: center; overflow: elide; }
+                                    if domain.status != "ready" : Text {
+                                        text: "Needs setup";
+                                        color: Theme.amber;
+                                        font-size: 11px;
+                                        vertical-alignment: center;
+                                        setup-link := TouchArea {
+                                            mouse-cursor: pointer;
+                                            clicked => { root.current-tab = 2; }
+                                        }
+                                    }
+                                    if domain.status != "ready" : Rectangle { width: 6px; }
+                                    VerticalLayout { alignment: center; Button { height: 28px; icon: Icons.copy; kind: "ghost"; activated => { root.copy-text(url-row.url, "URL copied"); } } }
+                                    VerticalLayout { alignment: center; Button { height: 28px; icon: Icons.external; kind: "ghost"; activated => { root.open-url(url-row.url); } } }
+                                }
+                            }
+                        }
+
+                        // Flow
+                        Rectangle {
+                            height: 64px;
+                            border-radius: 8px;
+                            border-width: 1px;
+                            border-color: Theme.border-subtle;
+                            background: #0d0d0d;
+                            HorizontalLayout {
+                                padding-left: 14px;
+                                padding-right: 14px;
+                                spacing: 8px;
+                                alignment: space-between;
+                                VerticalLayout {
+                                    alignment: center;
+                                    spacing: 3px;
+                                    Text { text: "Browser"; color: Theme.text-tertiary; font-size: 10px; }
+                                    Text { text: root.listen-label; color: Theme.text-secondary; font-size: 12px; font-family: Theme.mono; }
+                                }
+                                VerticalLayout { alignment: center; Icon { glyph: Icons.arrow; tint: Theme.text-tertiary; } }
+                                VerticalLayout {
+                                    alignment: center;
+                                    spacing: 3px;
+                                    Text { text: "Doorman"; color: Theme.accent; font-size: 10px; horizontal-alignment: center; }
+                                    Text { text: root.selected-route.name; color: Theme.text; font-size: 12px; font-family: Theme.mono; horizontal-alignment: center; }
+                                }
+                                VerticalLayout { alignment: center; Icon { glyph: Icons.arrow; tint: Theme.text-tertiary; } }
+                                VerticalLayout {
+                                    alignment: center;
+                                    spacing: 3px;
+                                    Text { text: "App"; color: Theme.text-tertiary; font-size: 10px; horizontal-alignment: right; }
+                                    Text { text: ":\{root.selected-route.port}"; color: root.selected-route.healthy ? Theme.green : Theme.amber; font-size: 12px; font-family: Theme.mono; horizontal-alignment: right; }
+                                }
+                            }
+                        }
+
+                        // Properties
+                        VerticalLayout {
+                            spacing: 0px;
+                            Property { key: "Target"; value: root.selected-route.target; }
+                            Property { key: "Project"; value: root.selected-route.project; }
+                            if root.selected-route.command != "" : Property { key: "Command"; value: root.selected-route.command; }
+                            Property { key: "Owner PID"; value: root.selected-route.pid; }
+                            Property { key: "Created"; value: root.selected-route.created; mono: false; }
+                            Property {
+                                key: "Requests";
+                                value: root.selected-route.requests == 0 ? "" : root.selected-route.errors == 0 ? "\{root.selected-route.requests}" : "\{root.selected-route.requests}  ·  \{root.selected-route.errors} failed";
+                            }
+                            Property { key: "Avg latency"; value: root.selected-route.avg-latency; }
+                        }
+
+                        // Recent traffic
+                        VerticalLayout {
+                            spacing: 8px;
+                            vertical-stretch: 1;
+                            HorizontalLayout {
+                                SectionTitle { text: "Recent requests"; horizontal-stretch: 1; vertical-alignment: center; }
+                                if root.route-traffic.length > 0 : Text {
+                                    text: "View all →";
+                                    color: view-all.has-hover ? Theme.text : Theme.accent;
+                                    font-size: 12px;
+                                    view-all := TouchArea {
+                                        mouse-cursor: pointer;
+                                        clicked => { root.show-route-traffic(root.selected-route.name); }
+                                    }
+                                }
+                            }
+                            if root.route-traffic.length == 0 : Rectangle {
+                                height: 56px;
+                                border-radius: 6px;
+                                border-width: 1px;
+                                border-color: Theme.border-subtle;
+                                Text { text: "No requests yet — open the URL to see traffic."; color: Theme.text-tertiary; font-size: 12px; }
+                            }
+                            for request in root.route-traffic : Rectangle {
+                                height: 28px;
+                                border-radius: 4px;
+                                background: mini-touch.has-hover ? Theme.row-hover : transparent;
+                                HorizontalLayout {
+                                    padding-left: 6px;
+                                    padding-right: 6px;
+                                    spacing: 10px;
+                                    MethodBadge { width: 44px; method: request.method; }
+                                    Text { horizontal-stretch: 1; text: request.path; color: Theme.text-secondary; font-size: 12px; font-family: Theme.mono; vertical-alignment: center; overflow: elide; }
+                                    Text { text: request.status; color: Theme.status-color(request.status); font-size: 12px; font-family: Theme.mono; vertical-alignment: center; }
+                                    Text { width: 52px; text: request.time; color: Theme.text-tertiary; font-size: 11px; font-family: Theme.mono; vertical-alignment: center; horizontal-alignment: right; }
+                                }
+                                mini-touch := TouchArea {
+                                    mouse-cursor: pointer;
+                                    clicked => {
+                                        root.selected-request = request;
+                                        root.has-selected-request = true;
+                                        root.detail-tab = 0;
+                                        root.current-tab = 1;
+                                    }
+                                }
+                            }
+                            Rectangle { vertical-stretch: 1; }
+                        }
+
+                        Divider { }
+
+                        HorizontalLayout {
+                            spacing: 8px;
+                            Button { label: "Configure"; icon: Icons.edit; activated => { root.begin-edit(); } }
+                            Rectangle { horizontal-stretch: 1; }
+                            Button { label: "Remove"; icon: Icons.trash; kind: "danger"; activated => { root.remove-route(root.selected-route.name); } }
+                        }
+                    }
+                }
+            }
+
+            // ── Traffic tab ────────────────────────────────────────
+            if root.daemon-online && root.current-tab == 1 : HorizontalLayout {
+                VerticalLayout {
+                    horizontal-stretch: 1;
+
+                    // Toolbar
+                    HorizontalLayout {
+                        height: 56px;
+                        padding-left: 20px;
+                        padding-right: 20px;
+                        spacing: 6px;
+
+                        VerticalLayout {
+                            alignment: center;
+                            Button {
+                                icon: root.paused ? Icons.play : Icons.pause;
+                                label: root.paused ? "Resume" : "Pause";
+                                activated => {
+                                    if root.paused { root.resume(); } else { root.paused = true; }
+                                }
+                            }
+                        }
+                        VerticalLayout {
+                            alignment: center;
+                            Button { icon: Icons.clear; label: "Clear"; kind: "ghost"; enabled: root.traffic-total > 0; activated => { root.clear-traffic(); } }
+                        }
+                        Rectangle { width: 1px; height: 18px; y: 19px; background: Theme.border; }
+                        Rectangle { width: 6px; }
+
+                        chips := Flickable {
+                            horizontal-stretch: 1;
+                            content-width: chip-row.preferred-width;
+                            interactive: true;
+                            chip-row := HorizontalLayout {
+                                spacing: 6px;
+                                padding-top: 15px;
+                                padding-bottom: 15px;
+                                Chip {
+                                    label: "All routes";
+                                    active: root.traffic-route-filter == "";
+                                    activated => { root.traffic-route-filter = ""; root.filters-changed(); }
+                                }
+                                for name in root.route-names : Chip {
+                                    label: name;
+                                    active: root.traffic-route-filter == name;
+                                    activated => { root.traffic-route-filter = name; root.filters-changed(); }
+                                }
+                            }
+                        }
+
+                        Rectangle { width: 8px; }
+
+                        // Status segmented control
+                        VerticalLayout {
+                            alignment: center;
+                            Rectangle {
+                                height: 30px;
+                                horizontal-stretch: 0;
+                                border-radius: 6px;
+                                border-width: 1px;
+                                border-color: Theme.border;
+                                background: Theme.surface;
+                                HorizontalLayout {
+                                    padding: 2px;
+                                    spacing: 2px;
+                                    for option[i] in [
+                                        { key: "all", label: "All" },
+                                        { key: "ok", label: "Success" },
+                                        { key: "errors", label: "Errors" },
+                                    ] : Rectangle {
+                                        horizontal-stretch: 0;
+                                        border-radius: 4px;
+                                        background: root.traffic-status-filter == option.key ? #242424 : seg-touch.has-hover ? #1a1a1a : transparent;
+                                        HorizontalLayout {
+                                            padding-left: 10px;
+                                            padding-right: 10px;
+                                            Text {
+                                                text: option.label;
+                                                color: root.traffic-status-filter == option.key ? Theme.text : Theme.text-tertiary;
+                                                font-size: 12px;
+                                                vertical-alignment: center;
+                                            }
+                                        }
+                                        seg-touch := TouchArea {
+                                            mouse-cursor: pointer;
+                                            clicked => { root.traffic-status-filter = option.key; root.filters-changed(); }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Column header
+                    Rectangle {
+                        height: 32px;
+                        HorizontalLayout {
+                            padding-left: 20px;
+                            padding-right: 20px;
+                            spacing: 14px;
+                            HeaderCell { width: 64px; text: "Time"; }
+                            HeaderCell { width: 52px; text: "Method"; }
+                            HeaderCell { width: 110px; text: "Route"; }
+                            HeaderCell { horizontal-stretch: 1; text: "Path"; }
+                            HeaderCell { width: 36px; text: "Status"; }
+                            HeaderCell { width: 56px; text: "Duration"; horizontal-alignment: right; }
+                            if !root.has-selected-request : HeaderCell { width: 64px; text: "Size"; horizontal-alignment: right; }
+                        }
+                        Rectangle { y: 0; height: 1px; background: Theme.border-subtle; }
+                        Rectangle { y: parent.height - 1px; height: 1px; background: Theme.border-subtle; }
+                    }
+
+                    Rectangle {
+                        vertical-stretch: 1;
+
+                        if root.traffic.length == 0 : EmptyState {
+                            icon: Icons.arrow;
+                            title: root.traffic-total == 0 ? "Listening for requests" : "No matching requests";
+                            body: root.traffic-total == 0
+                                ? "Requests to your .localhost routes show up here in real time."
+                                : "Try a different route or status filter.";
+                        }
+
+                        if root.traffic.length > 0 : ScrollView {
+                            VerticalLayout {
+                                alignment: start;
+                                for request in root.traffic : TrafficRow {
+                                    request: request;
+                                    compact: root.has-selected-request;
+                                    selected: root.has-selected-request && root.selected-request.id == request.id;
+                                    activated => {
+                                        root.selected-request = request;
+                                        root.has-selected-request = true;
+                                    }
+                                }
+                            }
+                        }
+
+                        // "New requests" pill while paused
+                        if root.paused && root.pending-count > 0 : Rectangle {
+                            y: 12px;
+                            x: (parent.width - self.width) / 2;
+                            width: pill.preferred-width;
+                            height: 30px;
+                            border-radius: 15px;
+                            background: pill-touch.has-hover ? #2c2750 : Theme.accent-soft;
+                            border-width: 1px;
+                            border-color: #3b3460;
+                            drop-shadow-blur: 16px;
+                            drop-shadow-color: #00000099;
+                            pill := HorizontalLayout {
+                                padding-left: 12px;
+                                padding-right: 14px;
+                                spacing: 7px;
+                                VerticalLayout { alignment: center; Icon { glyph: Icons.arrow-up; tint: #cfc6ff; width: 12px; height: 12px; } }
+                                Text {
+                                    text: root.pending-count == 1 ? "1 new request" : "\{root.pending-count} new requests";
+                                    color: #cfc6ff;
+                                    font-size: 12px;
+                                    font-weight: 500;
+                                    vertical-alignment: center;
+                                }
+                            }
+                            pill-touch := TouchArea { mouse-cursor: pointer; clicked => { root.resume(); } }
+                        }
+                    }
+
+                    // Footer
+                    Rectangle {
+                        height: 30px;
+                        HorizontalLayout {
+                            padding-left: 20px;
+                            padding-right: 20px;
+                            spacing: 8px;
+                            if root.paused : Text { text: "Paused"; color: Theme.amber; font-size: 11px; vertical-alignment: center; }
+                            if root.paused : Text { text: "·"; color: Theme.text-tertiary; font-size: 11px; vertical-alignment: center; }
+                            Text { text: "\{root.traffic.length} of \{root.traffic-total} requests"; color: Theme.text-tertiary; font-size: 11px; vertical-alignment: center; }
+                            Rectangle { horizontal-stretch: 1; }
+                            Text { text: "Metadata only · last 200 kept in memory"; color: Theme.text-tertiary; font-size: 11px; vertical-alignment: center; }
+                        }
+                        Rectangle { y: 0; height: 1px; background: Theme.border-subtle; }
+                    }
+                }
+
+                // ── Request detail panel ───────────────────────────
+                if root.has-selected-request : Rectangle {
+                    width: 420px;
+                    background: Theme.bg;
+                    Rectangle { x: 0; width: 1px; background: Theme.border; }
+
+                    VerticalLayout {
+                        padding-left: 1px;
+
+                        VerticalLayout {
+                            padding: 20px;
+                            spacing: 10px;
+                            HorizontalLayout {
+                                spacing: 10px;
+                                MethodBadge { method: root.selected-request.method; font-size: 14px; }
+                                Text {
+                                    text: root.selected-request.status;
+                                    color: Theme.status-color(root.selected-request.status);
+                                    font-size: 14px;
+                                    font-weight: 600;
+                                    font-family: Theme.mono;
+                                    vertical-alignment: center;
+                                }
+                                Text { text: root.selected-request.duration; color: Theme.text-tertiary; font-size: 12px; vertical-alignment: center; }
+                                Rectangle { horizontal-stretch: 1; }
+                                Button { icon: Icons.close; kind: "ghost"; activated => { root.has-selected-request = false; } }
+                            }
+                            Text {
+                                text: root.selected-request.url;
+                                color: Theme.text;
+                                font-size: 12px;
+                                font-family: Theme.mono;
+                                wrap: word-wrap;
+                            }
+                            HorizontalLayout {
+                                spacing: 6px;
+                                alignment: start;
+                                Button {
+                                    height: 26px;
+                                    label: root.replaying ? "Replaying…" : "Replay";
+                                    icon: Icons.refresh;
+                                    kind: "primary";
+                                    enabled: !root.replaying;
+                                    activated => { root.replay-request(root.selected-request); }
+                                }
+                                Button { height: 26px; label: "Copy URL"; icon: Icons.copy; activated => { root.copy-text(root.selected-request.url, "URL copied"); } }
+                                Button { height: 26px; label: "Open"; icon: Icons.external; activated => { root.open-url(root.selected-request.url); } }
+                            }
+                            if root.selected-request.method != "GET" && root.selected-request.method != "HEAD" : Text {
+                                text: "Replay resends the method and path with an empty body — bodies are never captured.";
+                                color: Theme.text-tertiary;
+                                font-size: 11px;
+                                wrap: word-wrap;
+                            }
+                        }
+
+                        // Detail tabs
+                        Rectangle {
+                            height: 38px;
+                            HorizontalLayout {
+                                padding-left: 8px;
+                                alignment: start;
+                                Tab { label: "Overview"; show-count: false; active: root.detail-tab == 0; activated => { root.detail-tab = 0; } }
+                                Tab { label: "cURL"; show-count: false; active: root.detail-tab == 1; activated => { root.detail-tab = 1; } }
+                            }
+                            Rectangle { y: parent.height - 1px; height: 1px; background: Theme.border; }
+                        }
+
+                        if root.detail-tab == 0 : VerticalLayout {
+                            padding: 20px;
+                            spacing: 0px;
+                            vertical-stretch: 1;
+                            Property { key: "Route"; value: root.selected-request.route + ".localhost"; tint: Theme.accent; }
+                            Property { key: "Path"; value: root.selected-request.path; }
+                            Property { key: "Captured"; value: root.selected-request.full-time; mono: false; }
+                            Property { key: "Duration"; value: root.selected-request.duration; }
+                            Property { key: "Request size"; value: root.selected-request.request-size; }
+                            Property { key: "Response size"; value: root.selected-request.response-size; }
+                            Property { key: "Request ID"; value: "#\{root.selected-request.id}"; }
+                            Rectangle { height: 16px; }
+                            Rectangle {
+                                vertical-stretch: 0;
+                                border-radius: 6px;
+                                border-width: 1px;
+                                border-color: Theme.border-subtle;
+                                background: #0d0d0d;
+                                HorizontalLayout {
+                                    padding: 12px;
+                                    Text {
+                                        text: "Headers, cookies and bodies are never captured. Doorman keeps request metadata only.";
+                                        color: Theme.text-tertiary;
+                                        font-size: 11px;
+                                        wrap: word-wrap;
+                                    }
+                                }
+                            }
+                            Rectangle { vertical-stretch: 1; }
+                        }
+
+                        if root.detail-tab == 1 : VerticalLayout {
+                            padding: 20px;
+                            spacing: 10px;
+                            vertical-stretch: 1;
+                            Rectangle {
+                                vertical-stretch: 0;
+                                border-radius: 6px;
+                                border-width: 1px;
+                                border-color: Theme.border;
+                                background: Theme.surface;
+                                HorizontalLayout {
+                                    padding: 14px;
+                                    spacing: 8px;
+                                    Text {
+                                        horizontal-stretch: 1;
+                                        text: root.selected-request.curl;
+                                        color: Theme.text;
+                                        font-size: 12px;
+                                        font-family: Theme.mono;
+                                        wrap: word-wrap;
+                                    }
+                                }
+                            }
+                            HorizontalLayout {
+                                alignment: start;
+                                Button { label: "Copy command"; icon: Icons.copy; activated => { root.copy-text(root.selected-request.curl, "cURL copied"); } }
+                            }
+                            Rectangle { vertical-stretch: 1; }
+                        }
+                    }
+                }
+            }
+
+            // ── Domains tab ────────────────────────────────────────
+            if root.daemon-online && root.current-tab == 2 : ScrollView {
+                HorizontalLayout {
+                    alignment: center;
+                    VerticalLayout {
+                        width: min(720px, root.width - 48px);
+                        padding-top: 32px;
+                        padding-bottom: 32px;
+                        spacing: 20px;
+                        alignment: start;
+
+                        VerticalLayout {
+                            spacing: 6px;
+                            Text { text: "Domains"; color: Theme.text; font-size: 20px; font-weight: 600; }
+                            Text {
+                                text: "Every route answers on each domain below. Bring your own suffix — like .test or .acme.internal — instead of .localhost.";
+                                color: Theme.text-secondary;
+                                font-size: 13px;
+                                wrap: word-wrap;
+                            }
+                        }
+
+                        // Add a domain
+                        HorizontalLayout {
+                            spacing: 8px;
+                            Input {
+                                horizontal-stretch: 1;
+                                text <=> root.domain-draft;
+                                placeholder: "test";
+                                prefix: "<route>.";
+                                accepted => { root.add-domain(); }
+                                edited => { root.domain-error = ""; }
+                            }
+                            VerticalLayout {
+                                alignment: center;
+                                Button {
+                                    height: 36px;
+                                    label: "Add domain";
+                                    icon: Icons.plus;
+                                    kind: "primary";
+                                    enabled: root.domain-draft != "";
+                                    activated => { root.add-domain(); }
+                                }
+                            }
+                        }
+                        if root.domain-error != "" : Text {
+                            text: root.domain-error;
+                            color: Theme.red;
+                            font-size: 12px;
+                            wrap: word-wrap;
+                        }
+
+                        if !root.dns-running : Rectangle {
+                            border-radius: 8px;
+                            border-width: 1px;
+                            border-color: #4a3a1a;
+                            background: #1a1508;
+                            HorizontalLayout {
+                                padding: 12px;
+                                Text {
+                                    text: "Doorman's DNS responder couldn't start, so custom domains won't resolve. Another process may be using its port — set DOORMAN_DNS_PORT and restart the daemon.";
+                                    color: Theme.amber;
+                                    font-size: 12px;
+                                    wrap: word-wrap;
+                                }
+                            }
+                        }
+
+                        // Domain list
+                        Rectangle {
+                            border-radius: 8px;
+                            border-width: 1px;
+                            border-color: Theme.border;
+                            background: Theme.bg;
+                            clip: true;
+                            VerticalLayout {
+                                for domain[index] in root.domains : VerticalLayout {
+                                    if index > 0 : Divider { }
+                                    HorizontalLayout {
+                                        height: 56px;
+                                        padding-left: 16px;
+                                        padding-right: 10px;
+                                        spacing: 12px;
+                                        VerticalLayout {
+                                            alignment: center;
+                                            Rectangle {
+                                                width: 28px;
+                                                height: 28px;
+                                                border-radius: 6px;
+                                                border-width: 1px;
+                                                border-color: Theme.border;
+                                                background: Theme.surface;
+                                                Icon { glyph: Icons.globe; tint: Theme.text-secondary; }
+                                            }
+                                        }
+                                        VerticalLayout {
+                                            horizontal-stretch: 1;
+                                            alignment: center;
+                                            spacing: 3px;
+                                            Text { text: "." + domain.name; color: Theme.text; font-size: 13px; font-weight: 500; font-family: Theme.mono; overflow: elide; }
+                                            Text {
+                                                text: domain.builtin
+                                                    ? "Built in · resolves everywhere without setup"
+                                                    : "e.g. " + root.url-scheme + (root.routes.length > 0 ? root.routes[0].name : "web") + "." + domain.name + root.port-suffix();
+                                                color: Theme.text-tertiary;
+                                                font-size: 12px;
+                                                overflow: elide;
+                                            }
+                                        }
+                                        VerticalLayout {
+                                            alignment: center;
+                                            Rectangle {
+                                                height: 22px;
+                                                horizontal-stretch: 0;
+                                                border-radius: 11px;
+                                                background: domain.status == "ready" ? #0f2a1f : #2a2110;
+                                                HorizontalLayout {
+                                                    padding-left: 8px;
+                                                    padding-right: 9px;
+                                                    spacing: 6px;
+                                                    VerticalLayout { alignment: center; Dot { tint: domain.status == "ready" ? Theme.green : Theme.amber; width: 6px; height: 6px; } }
+                                                    Text {
+                                                        text: domain.status == "ready" ? "Ready" : domain.status == "conflict" ? "Resolver conflict" : "Needs setup";
+                                                        color: domain.status == "ready" ? Theme.green : Theme.amber;
+                                                        font-size: 11px;
+                                                        font-weight: 500;
+                                                        vertical-alignment: center;
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        if !domain.builtin : VerticalLayout {
+                                            alignment: center;
+                                            Button {
+                                                label: root.verifying-domain == domain.name ? "Testing…" : "Test";
+                                                kind: "ghost";
+                                                enabled: root.verifying-domain == "";
+                                                activated => { root.verify-domain(domain.name); }
+                                            }
+                                        }
+                                        if !domain.builtin : VerticalLayout {
+                                            alignment: center;
+                                            Button { icon: Icons.trash; kind: "ghost"; activated => { root.remove-domain(domain.name); } }
+                                        }
+                                    }
+
+                                    // One-time resolver setup
+                                    if domain.status != "ready" : HorizontalLayout {
+                                        padding-left: 56px;
+                                        padding-right: 16px;
+                                        padding-bottom: 16px;
+                                        spacing: 16px;
+                                        VerticalLayout {
+                                            horizontal-stretch: 1;
+                                            alignment: center;
+                                            spacing: 3px;
+                                            Text {
+                                                text: domain.status == "conflict"
+                                                    ? "/etc/resolver/" + domain.name + " points somewhere else."
+                                                    : "macOS doesn't send ." + domain.name + " lookups to Doorman yet.";
+                                                color: Theme.text-secondary;
+                                                font-size: 12px;
+                                                overflow: elide;
+                                            }
+                                            Text {
+                                                text: "Your Mac asks for your password once. From a terminal: doorman domain setup";
+                                                color: Theme.text-tertiary;
+                                                font-size: 11px;
+                                                overflow: elide;
+                                            }
+                                        }
+                                        VerticalLayout {
+                                            alignment: center;
+                                            Button {
+                                                label: root.setting-up-domains ? "Waiting for password…" : domain.status == "conflict" ? "Fix" : "Set up";
+                                                kind: "primary";
+                                                enabled: !root.setting-up-domains;
+                                                activated => { root.setup-domains(); }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        Rectangle {
+                            height: 64px;
+                            border-radius: 8px;
+                            border-width: 1px;
+                            border-color: Theme.border;
+                            HorizontalLayout {
+                                padding-left: 16px;
+                                padding-right: 16px;
+                                spacing: 12px;
+                                VerticalLayout {
+                                    horizontal-stretch: 1;
+                                    alignment: center;
+                                    spacing: 3px;
+                                    Text { text: "Wildcard subdomains"; color: Theme.text; font-size: 13px; font-weight: 500; }
+                                    Text {
+                                        text: "Send unknown names like tenant.web.localhost to the web route.";
+                                        color: Theme.text-tertiary;
+                                        font-size: 12px;
+                                        overflow: elide;
+                                    }
+                                }
+                                VerticalLayout {
+                                    alignment: center;
+                                    Rectangle {
+                                        width: 36px;
+                                        height: 20px;
+                                        border-radius: 10px;
+                                        background: root.wildcard ? Theme.accent : #2a2a2a;
+                                        animate background { duration: 150ms; }
+                                        Rectangle {
+                                            x: root.wildcard ? parent.width - self.width - 2px : 2px;
+                                            y: 2px;
+                                            width: 16px;
+                                            height: 16px;
+                                            border-radius: 8px;
+                                            background: #ffffff;
+                                            animate x { duration: 150ms; easing: ease-out; }
+                                        }
+                                        TouchArea {
+                                            mouse-cursor: pointer;
+                                            clicked => { root.set-wildcard(!root.wildcard); }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        Text {
+                            text: "Tip: .local belongs to Bonjour, and bare public TLDs like .dev would hijack real sites. Use .test, .internal, or a subdomain you own.";
+                            color: Theme.text-tertiary;
+                            font-size: 11px;
+                            wrap: word-wrap;
+                        }
+                    }
+                }
+            }
+
+            // Toast
+            if root.toast != "" : Rectangle {
+                y: parent.height - self.height - 44px;
+                x: (parent.width - self.width) / 2;
+                width: toast-row.preferred-width;
+                height: 34px;
+                border-radius: 8px;
+                background: #1c1c1c;
+                border-width: 1px;
+                border-color: Theme.border-strong;
+                drop-shadow-blur: 20px;
+                drop-shadow-color: #000000aa;
+                toast-row := HorizontalLayout {
+                    padding-left: 12px;
+                    padding-right: 14px;
+                    spacing: 8px;
+                    VerticalLayout { alignment: center; Dot { tint: Theme.green; } }
+                    Text { text: root.toast; color: Theme.text; font-size: 12px; vertical-alignment: center; }
+                }
+            }
+        }
+    }
+}
+
+export component DoormanTray inherits SystemTrayIcon {
+    icon: @image-url("../assets/doorman-tray.svg");
+    tooltip: "Doorman";
+    callback open;
+    callback refresh;
+    callback quit;
+    clicked => { open(); }
+    Menu {
+        MenuItem { title: "Open Doorman"; activated => { open(); } }
+        MenuItem { title: "Refresh routes"; activated => { refresh(); } }
+        MenuSeparator { }
+        MenuItem { title: "Quit"; activated => { quit(); } }
+    }
+}
