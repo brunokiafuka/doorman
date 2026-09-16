@@ -13,6 +13,8 @@ picks a free port, tells your framework to use it, and routes
 `https://<name>.localhost` (or your own domain) to it through a local proxy. A native
 macOS companion shows routes, live traffic, and domains.
 
+![Doorman's traffic inspector: live requests for a Vite app on https://site.test, filtered to one route, with a request's details and Replay, Copy URL, and cURL actions](docs/images/traffic-inspector.png)
+
 ## Quick start
 
 ```bash
