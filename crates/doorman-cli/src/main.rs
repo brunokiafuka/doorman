@@ -132,6 +132,9 @@ enum ServiceCommand {
 }
 
 fn main() -> ExitCode {
+    // Exit quietly when piped into `head` and friends instead of panicking.
+    // SAFETY: restoring the default SIGPIPE disposition has no preconditions.
+    unsafe { libc::signal(libc::SIGPIPE, libc::SIG_DFL) };
     match dispatch(Cli::parse()) {
         Ok(code) => code,
         Err(error) => {

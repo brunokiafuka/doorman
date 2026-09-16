@@ -143,7 +143,18 @@ async fn bind_proxy(
     fallback: u16,
 ) -> Result<(u16, Vec<TcpListener>)> {
     let port = explicit.unwrap_or(preferred);
-    match bind_port(port).await {
+    // A previous proxy (or a restarting daemon) can take a moment to release its port.
+    let mut attempt = bind_port(port).await;
+    for _ in 0..10 {
+        match &attempt {
+            Err(error) if error.kind() == std::io::ErrorKind::AddrInUse => {
+                tokio::time::sleep(Duration::from_millis(200)).await;
+                attempt = bind_port(port).await;
+            }
+            _ => break,
+        }
+    }
+    match attempt {
         Ok(listeners) => Ok((port, listeners)),
         Err(error) if explicit.is_none() => {
             eprintln!("port {port} unavailable ({error}); using {fallback}");
