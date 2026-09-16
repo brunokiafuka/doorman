@@ -19,7 +19,7 @@ use serde_json::Value;
 
 use crate::client;
 
-/// Optional `doorman.json` in the project root.
+/// Project settings from `doorman.json`, or a settings block in package.json.
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectConfig {
@@ -46,9 +46,10 @@ impl Project {
             })
             .unwrap_or(start)
             .to_path_buf();
-        let config =
-            read_json::<ProjectConfig>(&root.join(PROJECT_CONFIG_FILE)).unwrap_or_default();
         let package = read_json::<Value>(&root.join("package.json"));
+        let config = read_json::<ProjectConfig>(&root.join(PROJECT_CONFIG_FILE))
+            .or_else(|| package.as_ref().and_then(package_config))
+            .unwrap_or_default();
         Self {
             root,
             config,
@@ -60,14 +61,12 @@ impl Project {
         self.package.as_ref()?.get("scripts")?.get(name)?.as_str()
     }
 
-    /// doorman.json name, package.json `"doorman"` key or name, git root, then folder.
+    /// Project config name, package.json name, git root, then folder.
     fn name(&self, git: Option<&GitInfo>) -> String {
-        let from_package = self.package.as_ref().and_then(|package| {
-            package
-                .get("doorman")
-                .and_then(Value::as_str)
-                .or_else(|| package.get("name").and_then(Value::as_str))
-        });
+        let from_package = self
+            .package
+            .as_ref()
+            .and_then(|package| package.get("name").and_then(Value::as_str));
         let candidates = [
             self.config.name.clone(),
             from_package.map(str::to_owned),
@@ -86,6 +85,19 @@ impl Project {
             })
             .find(|candidate| !candidate.is_empty())
             .unwrap_or_else(|| "app".to_owned())
+    }
+}
+
+/// Reads the `"doorman"` block from package.json: a bare name string, or an object with
+/// `name`, `script`, and `appPort`.
+fn package_config(package: &Value) -> Option<ProjectConfig> {
+    match package.get("doorman")? {
+        Value::String(name) => Some(ProjectConfig {
+            name: Some(name.clone()),
+            ..ProjectConfig::default()
+        }),
+        value @ Value::Object(_) => serde_json::from_value(value.clone()).ok(),
+        _ => None,
     }
 }
 
@@ -142,16 +154,31 @@ enum PackageManager {
 }
 
 impl PackageManager {
+    /// The manager that invoked us (e.g. `pnpm dev`), else the nearest lockfile, which in
+    /// a monorepo lives above the package.
     fn detect(root: &Path) -> Self {
-        if root.join("pnpm-lock.yaml").exists() {
-            Self::Pnpm
-        } else if root.join("yarn.lock").exists() {
-            Self::Yarn
-        } else if root.join("bun.lockb").exists() || root.join("bun.lock").exists() {
-            Self::Bun
-        } else {
-            Self::Npm
-        }
+        let invoked_by = std::env::var("npm_config_user_agent")
+            .ok()
+            .and_then(|agent| {
+                let program = agent.split('/').next()?.to_owned();
+                Self::parse(&program)
+            });
+        invoked_by
+            .or_else(|| root.ancestors().find_map(Self::from_lockfile))
+            .unwrap_or(Self::Npm)
+    }
+
+    fn from_lockfile(directory: &Path) -> Option<Self> {
+        [
+            ("pnpm-lock.yaml", Self::Pnpm),
+            ("yarn.lock", Self::Yarn),
+            ("bun.lock", Self::Bun),
+            ("bun.lockb", Self::Bun),
+            ("package-lock.json", Self::Npm),
+        ]
+        .into_iter()
+        .find(|(file, _)| directory.join(file).exists())
+        .map(|(_, manager)| manager)
     }
 
     fn parse(program: &str) -> Option<Self> {
@@ -185,11 +212,19 @@ pub fn run(options: RunOptions) -> Result<ExitCode> {
     let mut command = options.command;
     if command.is_empty() {
         let script = project.config.script.as_deref().unwrap_or("dev");
-        if project.script(script).is_none() {
-            bail!(
+        match project.script(script) {
+            None => bail!(
                 "no command given and package.json has no \"{script}\" script.\n\
                  Try: doorman run <command>, e.g. doorman run npm run dev"
-            );
+            ),
+            // `"dev": "doorman"` would start itself forever.
+            Some(body) if body.split_whitespace().next() == Some("doorman") => {
+                bail!(
+                    "the \"{script}\" script runs {body} itself. Point Doorman at the real server script, \
+                 e.g. add \"doorman\": {{ \"script\": \"dev:app\" }} to package.json"
+                )
+            }
+            Some(_) => {}
         }
         let manager = PackageManager::detect(&project.root);
         command = vec![
@@ -544,6 +579,37 @@ mod tests {
             with_port_flags(&args("npm run dev"), Some("NODE_ENV=dev vite"), 4100),
             args("npm run dev")
         );
+    }
+
+    #[test]
+    fn finds_lockfiles_above_the_package() {
+        let root = std::env::temp_dir().join(format!("doorman-lock-{}", std::process::id()));
+        let package = root.join("apps/site");
+        std::fs::create_dir_all(&package).unwrap();
+        std::fs::write(root.join("pnpm-lock.yaml"), "").unwrap();
+        assert_eq!(
+            package.ancestors().find_map(PackageManager::from_lockfile),
+            Some(PackageManager::Pnpm)
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn reads_the_doorman_package_block() {
+        let block = serde_json::json!({
+            "doorman": { "name": "site.uselucerna", "script": "dev:app", "appPort": 5177 }
+        });
+        let config = package_config(&block).unwrap();
+        assert_eq!(config.name.as_deref(), Some("site.uselucerna"));
+        assert_eq!(config.script.as_deref(), Some("dev:app"));
+        assert_eq!(config.app_port, Some(5177));
+
+        let name_only = serde_json::json!({ "doorman": "shop" });
+        assert_eq!(
+            package_config(&name_only).unwrap().name.as_deref(),
+            Some("shop")
+        );
+        assert!(package_config(&serde_json::json!({ "name": "x" })).is_none());
     }
 
     #[test]
