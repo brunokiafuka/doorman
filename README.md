@@ -68,7 +68,8 @@ DOORMAN=0 doorman               # bypass Doorman entirely (e.g. in CI)
   they sit behind `npm run`/`pnpm`/`yarn`/`bun` scripts. Compound scripts (`&&`, pipes,
   env prefixes) are left untouched.
 - **Handles git worktrees**: a linked worktree on branch `fix-ui` gets
-  `https://fix-ui.my-app.localhost`.
+  `https://fix-ui.my-app.localhost` and a free port, even when `appPort` is pinned, so
+  it runs alongside the main checkout.
 - **Cleans up**: the route disappears when the command exits, and Ctrl-C or SIGTERM
   reaches every process the command started.
 
@@ -77,6 +78,14 @@ Optional `doorman.json` in the project root:
 ```json
 { "name": "shop", "script": "dev", "appPort": 3000 }
 ```
+
+### Worktrees in the app
+
+Routes started by `doorman run` remember their repository, branch, and worktree. The
+desktop app groups routes by repository with a branch badge per checkout, lists the
+other checkouts running the same app, and offers **Open in editor**, **Reveal in Finder**,
+and **Stop** (which ends the dev server and its route). Traffic rows show the branch
+too, and `doorman list` prints it next to each route.
 
 ## Fixed routes
 

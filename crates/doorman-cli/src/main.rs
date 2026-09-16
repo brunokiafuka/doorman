@@ -269,8 +269,17 @@ fn list(json: bool) -> Result<()> {
             (None, Some(pid)) => format!("  \x1b[2mpid {pid}\x1b[0m"),
             (None, None) => String::new(),
         };
+        let branch = route
+            .git
+            .as_ref()
+            .and_then(|git| {
+                let branch = git.branch.as_deref()?;
+                let mark = if git.linked { "⑂ " } else { "" };
+                Some(format!("  \x1b[35m{mark}{branch}\x1b[0m"))
+            })
+            .unwrap_or_default();
         println!(
-            "{marker} {:<40} → 127.0.0.1:{}{owner}",
+            "{marker} {:<40} → 127.0.0.1:{}{branch}{owner}",
             status.endpoints.url(&route.hostname()),
             route.port
         );

@@ -10,6 +10,16 @@ export struct RouteItem {
     created: string,
     healthy: bool,
     command: string,
+    // Group header row when non-empty (the repository name); other fields unused.
+    header: string,
+    header-count: int,
+    // Git checkout, empty when the route wasn't started inside git.
+    repo: string,
+    branch: string,
+    linked: bool,
+    base-name: string,
+    worktree: string,
+    worktree-path: string,
     requests: int,
     errors: int,
     last-seen: string,
@@ -26,6 +36,9 @@ export struct DomainItem {
 export struct TrafficItem {
     id: int,
     route: string,
+    // Route name without a worktree's branch prefix, and that branch.
+    route-label: string,
+    branch: string,
     host: string,
     method: string,
     path: string,
@@ -79,6 +92,10 @@ global Theme {
 global Icons {
     out property <string> globe: "M2.5 8a5.5 5.5 0 1 0 11 0a5.5 5.5 0 1 0-11 0 M2.5 8h11 M8 2.5c1.6 1.5 2.4 3.3 2.4 5.5S9.6 12 8 13.5C6.4 12 5.6 10.2 5.6 8S6.4 4 8 2.5";
     out property <string> check: "M3.5 8.5l3 3 6-7";
+    out property <string> branch: "M5 2.5v7 M5 9.5a2 2 0 1 0 0 4a2 2 0 1 0 0-4 M11 2.5a2 2 0 1 0 0 4a2 2 0 1 0 0-4 M11 6.5c0 2.5-3 2.5-6 4";
+    out property <string> folder: "M2 4.5a1 1 0 0 1 1-1h3.5l1.5 1.5h5a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1h-10a1 1 0 0 1-1-1z";
+    out property <string> code: "M5.5 4.5l-3.5 3.5 3.5 3.5 M10.5 4.5l3.5 3.5-3.5 3.5";
+    out property <string> stop: "M4 4h8v8h-8z";
     out property <string> door: "M4 14V2.75A.75.75 0 0 1 4.75 2h6.5a.75.75 0 0 1 .75.75V14 M2 14h12 M9.25 8h.5";
     out property <string> plus: "M8 3.5v9 M3.5 8h9";
     out property <string> refresh: "M13 8a5 5 0 1 1-1.46-3.54 M13 2.5v2.5h-2.5";
@@ -423,15 +440,57 @@ component CodeHint inherits Rectangle {
     }
 }
 
+component BranchChip inherits Rectangle {
+    in property <string> branch;
+    in property <bool> linked;
+    height: 20px;
+    horizontal-stretch: 0;
+    border-radius: 4px;
+    background: linked ? #1f1b33 : #171717;
+    HorizontalLayout {
+        padding-left: 6px;
+        padding-right: 7px;
+        spacing: 4px;
+        VerticalLayout {
+            alignment: center;
+            Icon { glyph: Icons.branch; tint: root.linked ? #b3a6ff : Theme.text-tertiary; width: 11px; height: 11px; }
+        }
+        Text {
+            text: root.branch;
+            color: root.linked ? #cfc6ff : Theme.text-secondary;
+            font-size: 11px;
+            font-family: Theme.mono;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+    }
+}
+
 component RouteRow inherits Rectangle {
     in property <RouteItem> route;
     in property <bool> selected;
     callback activated;
 
-    height: 44px;
-    background: selected ? Theme.row-selected : touch.has-hover ? Theme.row-hover : transparent;
+    property <bool> is-header: route.header != "";
+    height: is-header ? 36px : 44px;
+    background: is-header ? #0d0d0d : selected ? Theme.row-selected : touch.has-hover ? Theme.row-hover : transparent;
 
-    HorizontalLayout {
+    if root.is-header : HorizontalLayout {
+        padding-left: 20px;
+        padding-right: 20px;
+        spacing: 8px;
+        VerticalLayout { alignment: center; Icon { glyph: Icons.folder; tint: Theme.text-tertiary; width: 13px; height: 13px; } }
+        Text { text: root.route.header; color: Theme.text-secondary; font-size: 12px; font-weight: 600; vertical-alignment: center; }
+        Text {
+            horizontal-stretch: 1;
+            text: root.route.header-count == 1 ? "1 route" : "\{root.route.header-count} routes";
+            color: Theme.text-tertiary;
+            font-size: 11px;
+            vertical-alignment: center;
+        }
+    }
+
+    if !root.is-header : HorizontalLayout {
         padding-left: 20px;
         padding-right: 20px;
         spacing: 16px;
@@ -462,15 +521,25 @@ component RouteRow inherits Rectangle {
             }
             }
         }
+        HorizontalLayout {
+            width: 140px;
+            alignment: start;
+            if root.route.branch != "" : VerticalLayout {
+                alignment: center;
+                BranchChip { branch: root.route.branch; linked: root.route.linked; }
+            }
+            if root.route.branch == "" : Text { text: "—"; color: Theme.text-tertiary; font-size: 12px; vertical-alignment: center; }
+        }
         Text { width: 120px; text: root.route.target; color: Theme.text-secondary; font-size: 12px; font-family: Theme.mono; vertical-alignment: center; overflow: elide; }
         Text { width: 72px; text: root.route.requests; color: root.route.requests == 0 ? Theme.text-tertiary : Theme.text-secondary; font-size: 12px; font-family: Theme.mono; vertical-alignment: center; horizontal-alignment: right; }
         Text { width: 92px; text: root.route.last-seen == "" ? "—" : root.route.last-seen; color: Theme.text-tertiary; font-size: 12px; vertical-alignment: center; horizontal-alignment: right; overflow: elide; }
     }
 
     Rectangle { y: parent.height - 1px; height: 1px; background: Theme.border-subtle; }
-    if root.selected : Rectangle { x: 0; width: 2px; background: Theme.accent; }
+    if root.selected && !root.is-header : Rectangle { x: 0; width: 2px; background: Theme.accent; }
 
     touch := TouchArea {
+        enabled: !root.is-header;
         mouse-cursor: pointer;
         clicked => { root.activated(); }
     }
@@ -491,7 +560,16 @@ component TrafficRow inherits Rectangle {
         spacing: 14px;
         Text { width: 64px; text: root.request.time; color: Theme.text-tertiary; font-size: 12px; font-family: Theme.mono; vertical-alignment: center; }
         MethodBadge { width: 52px; method: root.request.method; }
-        Text { width: 110px; text: root.request.route; color: Theme.text-secondary; font-size: 12px; vertical-alignment: center; overflow: elide; }
+        HorizontalLayout {
+            width: 170px;
+            spacing: 6px;
+            Text { text: root.request.route-label; color: Theme.text-secondary; font-size: 12px; vertical-alignment: center; overflow: elide; }
+            if root.request.branch != "" : VerticalLayout {
+                alignment: center;
+                BranchChip { branch: root.request.branch; linked: true; }
+            }
+            Rectangle { horizontal-stretch: 1; }
+        }
         Text { horizontal-stretch: 1; text: root.request.path; color: Theme.text; font-size: 12px; font-family: Theme.mono; vertical-alignment: center; overflow: elide; }
         Text { width: 36px; text: root.request.status; color: Theme.status-color(root.request.status); font-size: 12px; font-weight: 500; font-family: Theme.mono; vertical-alignment: center; }
         Text { width: 56px; text: root.request.duration; color: Theme.text-secondary; font-size: 12px; font-family: Theme.mono; vertical-alignment: center; horizontal-alignment: right; }
@@ -538,6 +616,8 @@ export component MainWindow inherits Window {
     in-out property <string> route-query;
     in-out property <bool> has-selected-route;
     in-out property <RouteItem> selected-route;
+    // Other checkouts (main or worktrees) running the selected route's app.
+    in property <[RouteItem]> route-checkouts;
 
     // Route form: "" | "create" | "edit"
     in-out property <string> form-mode;
@@ -577,6 +657,9 @@ export component MainWindow inherits Window {
     callback open-url(string);
     callback copy-text(string, string);
     callback remove-route(string);
+    callback stop-route(RouteItem);
+    callback reveal-path(string);
+    callback open-in-editor(string);
     callback save-route() -> bool;
     callback scan-ports;
     callback clear-traffic;
@@ -827,6 +910,7 @@ export component MainWindow inherits Window {
                                 padding-right: 20px;
                                 spacing: 16px;
                                 HeaderCell { horizontal-stretch: 1; text: "Name"; }
+                                HeaderCell { width: 140px; text: "Branch"; }
                                 HeaderCell { width: 120px; text: "Target"; }
                                 HeaderCell { width: 72px; text: "Requests"; horizontal-alignment: right; }
                                 HeaderCell { width: 92px; text: "Last request"; horizontal-alignment: right; }
@@ -1018,9 +1102,26 @@ export component MainWindow inherits Window {
                                         font-size: 12px;
                                     }
                                 }
+                                if root.selected-route.branch != "" : HorizontalLayout {
+                                    spacing: 8px;
+                                    alignment: start;
+                                    BranchChip { branch: root.selected-route.branch; linked: root.selected-route.linked; }
+                                    Text {
+                                        text: root.selected-route.linked ? "worktree" : "main checkout";
+                                        color: Theme.text-tertiary;
+                                        font-size: 11px;
+                                        vertical-alignment: center;
+                                    }
+                                }
                             }
                             Button { icon: Icons.close; kind: "ghost"; activated => { root.has-selected-route = false; } }
                         }
+
+                        ScrollView {
+                            vertical-stretch: 1;
+                        VerticalLayout {
+                            spacing: 20px;
+                            alignment: start;
 
                         // One URL per domain
                         VerticalLayout {
@@ -1054,37 +1155,36 @@ export component MainWindow inherits Window {
                             }
                         }
 
-                        // Flow
-                        Rectangle {
-                            height: 64px;
-                            border-radius: 8px;
-                            border-width: 1px;
-                            border-color: Theme.border-subtle;
-                            background: #0d0d0d;
-                            HorizontalLayout {
-                                padding-left: 14px;
-                                padding-right: 14px;
-                                spacing: 8px;
-                                alignment: space-between;
-                                VerticalLayout {
-                                    alignment: center;
-                                    spacing: 3px;
-                                    Text { text: "Browser"; color: Theme.text-tertiary; font-size: 10px; }
-                                    Text { text: root.listen-label; color: Theme.text-secondary; font-size: 12px; font-family: Theme.mono; }
+                        // Other checkouts of the same app
+                        if root.route-checkouts.length > 0 : VerticalLayout {
+                            spacing: 6px;
+                            SectionTitle { text: "Other checkouts"; }
+                            for checkout in root.route-checkouts : Rectangle {
+                                height: 34px;
+                                border-radius: 6px;
+                                background: checkout-touch.has-hover ? Theme.row-hover : transparent;
+                                HorizontalLayout {
+                                    padding-left: 6px;
+                                    padding-right: 6px;
+                                    spacing: 10px;
+                                    VerticalLayout { alignment: center; Dot { tint: checkout.healthy ? Theme.green : Theme.amber; } }
+                                    VerticalLayout {
+                                        alignment: center;
+                                        horizontal-stretch: 1;
+                                        HorizontalLayout {
+                                            alignment: start;
+                                            BranchChip { branch: checkout.branch != "" ? checkout.branch : "detached"; linked: checkout.linked; }
+                                        }
+                                    }
+                                    Text { text: ":\{checkout.port}"; color: Theme.text-tertiary; font-size: 12px; font-family: Theme.mono; vertical-alignment: center; }
+                                    Text { text: "→"; color: Theme.text-tertiary; font-size: 12px; vertical-alignment: center; }
                                 }
-                                VerticalLayout { alignment: center; Icon { glyph: Icons.arrow; tint: Theme.text-tertiary; } }
-                                VerticalLayout {
-                                    alignment: center;
-                                    spacing: 3px;
-                                    Text { text: "Doorman"; color: Theme.accent; font-size: 10px; horizontal-alignment: center; }
-                                    Text { text: root.selected-route.name; color: Theme.text; font-size: 12px; font-family: Theme.mono; horizontal-alignment: center; }
-                                }
-                                VerticalLayout { alignment: center; Icon { glyph: Icons.arrow; tint: Theme.text-tertiary; } }
-                                VerticalLayout {
-                                    alignment: center;
-                                    spacing: 3px;
-                                    Text { text: "App"; color: Theme.text-tertiary; font-size: 10px; horizontal-alignment: right; }
-                                    Text { text: ":\{root.selected-route.port}"; color: root.selected-route.healthy ? Theme.green : Theme.amber; font-size: 12px; font-family: Theme.mono; horizontal-alignment: right; }
+                                checkout-touch := TouchArea {
+                                    mouse-cursor: pointer;
+                                    clicked => {
+                                        root.selected-route = checkout;
+                                        root.filters-changed();
+                                    }
                                 }
                             }
                         }
@@ -1093,7 +1193,9 @@ export component MainWindow inherits Window {
                         VerticalLayout {
                             spacing: 0px;
                             Property { key: "Target"; value: root.selected-route.target; }
-                            Property { key: "Project"; value: root.selected-route.project; }
+                            if root.selected-route.branch != "" : Property { key: "Branch"; value: root.selected-route.branch; }
+                            if root.selected-route.worktree != "" : Property { key: root.selected-route.linked ? "Worktree" : "Checkout"; value: root.selected-route.worktree; }
+                            if root.selected-route.project != root.selected-route.worktree-path : Property { key: "Project"; value: root.selected-route.project; }
                             if root.selected-route.command != "" : Property { key: "Command"; value: root.selected-route.command; }
                             Property { key: "Owner PID"; value: root.selected-route.pid; }
                             Property { key: "Created"; value: root.selected-route.created; mono: false; }
@@ -1107,7 +1209,6 @@ export component MainWindow inherits Window {
                         // Recent traffic
                         VerticalLayout {
                             spacing: 8px;
-                            vertical-stretch: 1;
                             HorizontalLayout {
                                 SectionTitle { text: "Recent requests"; horizontal-stretch: 1; vertical-alignment: center; }
                                 if root.route-traffic.length > 0 : Text {
@@ -1150,16 +1251,65 @@ export component MainWindow inherits Window {
                                     }
                                 }
                             }
-                            Rectangle { vertical-stretch: 1; }
+                        }
+
+                        // Flow
+                        Rectangle {
+                            height: 64px;
+                            border-radius: 8px;
+                            border-width: 1px;
+                            border-color: Theme.border-subtle;
+                            background: #0d0d0d;
+                            HorizontalLayout {
+                                padding-left: 14px;
+                                padding-right: 14px;
+                                spacing: 8px;
+                                alignment: space-between;
+                                VerticalLayout {
+                                    alignment: center;
+                                    spacing: 3px;
+                                    Text { text: "Browser"; color: Theme.text-tertiary; font-size: 10px; }
+                                    Text { text: root.listen-label; color: Theme.text-secondary; font-size: 12px; font-family: Theme.mono; }
+                                }
+                                VerticalLayout { alignment: center; Icon { glyph: Icons.arrow; tint: Theme.text-tertiary; } }
+                                VerticalLayout {
+                                    alignment: center;
+                                    spacing: 3px;
+                                    Text { text: "Doorman"; color: Theme.accent; font-size: 10px; horizontal-alignment: center; }
+                                    Text { text: root.selected-route.name; color: Theme.text; font-size: 12px; font-family: Theme.mono; horizontal-alignment: center; }
+                                }
+                                VerticalLayout { alignment: center; Icon { glyph: Icons.arrow; tint: Theme.text-tertiary; } }
+                                VerticalLayout {
+                                    alignment: center;
+                                    spacing: 3px;
+                                    Text { text: "App"; color: Theme.text-tertiary; font-size: 10px; horizontal-alignment: right; }
+                                    Text { text: ":\{root.selected-route.port}"; color: root.selected-route.healthy ? Theme.green : Theme.amber; font-size: 12px; font-family: Theme.mono; horizontal-alignment: right; }
+                                }
+                            }
+                        }
+
+                        }
                         }
 
                         Divider { }
 
                         HorizontalLayout {
-                            spacing: 8px;
-                            Button { label: "Configure"; icon: Icons.edit; activated => { root.begin-edit(); } }
+                            spacing: 6px;
+                            // Routes started by `doorman run` are owned by a process: stop it
+                            // instead of editing a route that would vanish with it.
+                            if root.selected-route.pid != "" : Button {
+                                icon: Icons.folder;
+                                activated => { root.reveal-path(root.selected-route.worktree-path != "" ? root.selected-route.worktree-path : root.selected-route.project); }
+                            }
+                            if root.selected-route.pid != "" : Button {
+                                label: "Open in editor";
+                                icon: Icons.code;
+                                activated => { root.open-in-editor(root.selected-route.worktree-path != "" ? root.selected-route.worktree-path : root.selected-route.project); }
+                            }
+                            if root.selected-route.pid == "" : Button { label: "Configure"; icon: Icons.edit; activated => { root.begin-edit(); } }
                             Rectangle { horizontal-stretch: 1; }
-                            Button { label: "Remove"; icon: Icons.trash; kind: "danger"; activated => { root.remove-route(root.selected-route.name); } }
+                            if root.selected-route.pid != "" : Button { label: "Stop"; icon: Icons.stop; kind: "danger"; activated => { root.stop-route(root.selected-route); } }
+                            if root.selected-route.pid == "" : Button { label: "Remove"; icon: Icons.trash; kind: "danger"; activated => { root.remove-route(root.selected-route.name); } }
                         }
                     }
                 }
@@ -1267,7 +1417,7 @@ export component MainWindow inherits Window {
                             spacing: 14px;
                             HeaderCell { width: 64px; text: "Time"; }
                             HeaderCell { width: 52px; text: "Method"; }
-                            HeaderCell { width: 110px; text: "Route"; }
+                            HeaderCell { width: 170px; text: "Route"; }
                             HeaderCell { horizontal-stretch: 1; text: "Path"; }
                             HeaderCell { width: 36px; text: "Status"; }
                             HeaderCell { width: 56px; text: "Duration"; horizontal-alignment: right; }

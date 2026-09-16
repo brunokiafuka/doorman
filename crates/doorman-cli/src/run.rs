@@ -112,8 +112,35 @@ fn read_json<T: serde::de::DeserializeOwned>(path: &Path) -> Option<T> {
 
 pub struct GitInfo {
     root: PathBuf,
-    /// Branch name when this checkout is a linked worktree.
-    worktree_branch: Option<String>,
+    /// Shared git directory, identical across worktrees.
+    common_dir: PathBuf,
+    /// `None` when HEAD is detached.
+    branch: Option<String>,
+    linked: bool,
+}
+
+impl GitInfo {
+    /// DNS-safe branch label used to prefix routes started from a linked worktree.
+    fn worktree_label(&self) -> Option<String> {
+        self.branch
+            .as_deref()
+            .filter(|_| self.linked)
+            .map(sanitize_label)
+            .filter(|label| !label.is_empty())
+    }
+
+    fn context(&self, base_name: &str) -> doorman_core::GitContext {
+        // The shared git dir lives inside the main checkout (`<repo>/.git`).
+        let main_checkout = self.common_dir.parent().unwrap_or(&self.common_dir);
+        doorman_core::GitContext {
+            repo: self.common_dir.display().to_string(),
+            repo_name: folder_name(main_checkout).unwrap_or_else(|| "repository".to_owned()),
+            branch: self.branch.clone(),
+            worktree: self.root.display().to_string(),
+            linked: self.linked,
+            base_name: base_name.to_owned(),
+        }
+    }
 }
 
 fn git_info(directory: &Path) -> Option<GitInfo> {
@@ -135,13 +162,12 @@ fn git_info(directory: &Path) -> Option<GitInfo> {
     let mut lines = stdout.lines();
     let (root, git_dir, common_dir, branch) =
         (lines.next()?, lines.next()?, lines.next()?, lines.next()?);
-    // In a linked worktree the per-checkout git dir differs from the shared one.
-    let linked = git_dir != common_dir;
     Some(GitInfo {
         root: PathBuf::from(root),
-        worktree_branch: (linked && branch != "HEAD")
-            .then(|| sanitize_label(branch))
-            .filter(|label| !label.is_empty()),
+        common_dir: PathBuf::from(common_dir),
+        branch: (branch != "HEAD").then(|| branch.to_owned()),
+        // In a linked worktree the per-checkout git dir differs from the shared one.
+        linked: git_dir != common_dir,
     })
 }
 
@@ -248,9 +274,10 @@ pub fn run(options: RunOptions) -> Result<ExitCode> {
         }
         None => project.name(git.as_ref()),
     };
-    let name = match git.as_ref().and_then(|git| git.worktree_branch.as_deref()) {
+    let worktree_label = git.as_ref().and_then(GitInfo::worktree_label);
+    let name = match worktree_label.as_deref() {
         Some(branch) if !base.starts_with(&format!("{branch}.")) => format!("{branch}.{base}"),
-        _ => base,
+        _ => base.clone(),
     };
     validate_name(&name).with_context(|| format!("route name '{name}'"))?;
 
@@ -270,7 +297,13 @@ pub fn run(options: RunOptions) -> Result<ExitCode> {
         }
     }
 
-    let port = match project.config.app_port {
+    // A pinned port belongs to the main checkout; worktrees running alongside it would
+    // collide on it, so they get a free port and are reached through their own URL.
+    let pinned_port = project
+        .config
+        .app_port
+        .filter(|_| !git.as_ref().is_some_and(|git| git.linked));
+    let port = match pinned_port {
         Some(port) => port,
         None => free_port().context("no free port between 4000 and 4999")?,
     };
@@ -303,6 +336,7 @@ pub fn run(options: RunOptions) -> Result<ExitCode> {
 
     let route = Route {
         command: Some(command.join(" ")),
+        git: git.as_ref().map(|git| git.context(&base)),
         ..Route::new(
             name.clone(),
             port,
@@ -321,6 +355,9 @@ pub fn run(options: RunOptions) -> Result<ExitCode> {
         eprintln!("  \x1b[32m→\x1b[0m {}", status.endpoints.url(host));
     }
     eprintln!("  \x1b[2m  app on 127.0.0.1:{port}\x1b[0m");
+    if let (Some(pinned), None) = (project.config.app_port, pinned_port) {
+        eprintln!("  \x1b[2m  worktree: free port instead of the pinned {pinned}\x1b[0m");
+    }
     if status.ca_cert.is_some() && !status.ca_trusted {
         eprintln!("  \x1b[33m!\x1b[0m run `doorman trust` so browsers accept HTTPS");
     }
