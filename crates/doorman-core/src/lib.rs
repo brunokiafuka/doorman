@@ -44,7 +44,27 @@ pub struct Route {
     /// Command `doorman run` started, for display.
     #[serde(default)]
     pub command: Option<String>,
+    /// Checkout the route was started from, when `doorman run` ran inside git.
+    #[serde(default)]
+    pub git: Option<GitContext>,
     pub created_at: DateTime<Utc>,
+}
+
+/// Where a route's app is checked out, so clients can group checkouts of one repo.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct GitContext {
+    /// Shared git directory; identical for the main checkout and every worktree.
+    pub repo: String,
+    /// Display name for the repository (its main checkout's folder).
+    pub repo_name: String,
+    /// Checked-out branch; `None` when HEAD is detached.
+    pub branch: Option<String>,
+    /// Root of this checkout.
+    pub worktree: String,
+    /// Whether this checkout is a linked worktree rather than the main checkout.
+    pub linked: bool,
+    /// Route name without the worktree's branch prefix, shared across checkouts.
+    pub base_name: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -139,6 +159,7 @@ impl Route {
             pid,
             project,
             command: None,
+            git: None,
             created_at: Utc::now(),
         })
     }

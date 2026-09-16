@@ -46,6 +46,7 @@ struct Models {
     traffic: Rc<VecModel<TrafficItem>>,
     detected_ports: Rc<VecModel<i32>>,
     domains: Rc<VecModel<DomainItem>>,
+    route_checkouts: Rc<VecModel<RouteItem>>,
 }
 
 fn main() -> Result<()> {
@@ -61,6 +62,7 @@ fn main() -> Result<()> {
         traffic: Rc::new(VecModel::default()),
         detected_ports: Rc::new(VecModel::default()),
         domains: Rc::new(VecModel::default()),
+        route_checkouts: Rc::new(VecModel::default()),
     });
     app.set_routes(ModelRc::from(models.routes.clone()));
     app.set_route_names(ModelRc::from(models.route_names.clone()));
@@ -68,6 +70,7 @@ fn main() -> Result<()> {
     app.set_traffic(ModelRc::from(models.traffic.clone()));
     app.set_detected_ports(ModelRc::from(models.detected_ports.clone()));
     app.set_domains(ModelRc::from(models.domains.clone()));
+    app.set_route_checkouts(ModelRc::from(models.route_checkouts.clone()));
     app.set_version(env!("CARGO_PKG_VERSION").into());
 
     // Fetches from the daemon, then renders. `force` re-renders traffic even while paused.
@@ -327,6 +330,53 @@ fn main() -> Result<()> {
             });
         });
     }
+    {
+        let app_weak = app.as_weak();
+        app.on_stop_route(move |route| {
+            let Some(app) = app_weak.upgrade() else {
+                return;
+            };
+            // The owner is the `doorman run` process; it stops the server's whole process
+            // group and removes the route itself.
+            let stopped = Command::new("kill")
+                .args(["-TERM", route.pid.as_str()])
+                .status()
+                .is_ok_and(|status| status.success());
+            let label = if route.base_name.is_empty() {
+                &route.name
+            } else {
+                &route.base_name
+            };
+            show_toast(
+                &app,
+                if stopped {
+                    format!("Stopping {label}…")
+                } else {
+                    format!("Couldn't stop {label}; it may have already exited")
+                }
+                .into(),
+            );
+            let app_weak = app.as_weak();
+            Timer::single_shot(Duration::from_millis(1200), move || {
+                if let Some(app) = app_weak.upgrade() {
+                    app.invoke_refresh();
+                }
+            });
+        });
+    }
+    app.on_reveal_path(|path| {
+        let _ = Command::new("open").arg(path.as_str()).spawn();
+    });
+    {
+        let app_weak = app.as_weak();
+        app.on_open_in_editor(move |path| {
+            if !open_in_editor(&path)
+                && let Some(app) = app_weak.upgrade()
+            {
+                show_toast(&app, "No supported editor found; opened in Finder".into());
+            }
+        });
+    }
     app.on_open_url(|url| {
         let _ = Command::new("open").arg(url.as_str()).spawn();
     });
@@ -556,10 +606,11 @@ fn render(app: &MainWindow, state: &mut State, models: &Models, force: bool) {
     }
 
     let query = app.get_route_query().trim().to_lowercase();
-    let items = state
+    let matching = state
         .routes
         .iter()
         .filter(|route| {
+            let git = route.git.as_ref();
             query.is_empty()
                 || route.name.contains(&query)
                 || route.port.to_string().contains(&query)
@@ -567,9 +618,21 @@ fn render(app: &MainWindow, state: &mut State, models: &Models, force: bool) {
                     .project
                     .as_deref()
                     .is_some_and(|p| p.to_lowercase().contains(&query))
+                || git.is_some_and(|git| {
+                    git.repo_name.to_lowercase().contains(&query)
+                        || git
+                            .branch
+                            .as_deref()
+                            .is_some_and(|branch| branch.to_lowercase().contains(&query))
+                })
         })
-        .map(|route| route_item(route, &endpoints, stats.get(route.name.as_str())))
         .collect::<Vec<_>>();
+    let items = grouped_route_rows(&matching, &endpoints, &stats);
+    let routes_by_name: HashMap<&str, &Route> = state
+        .routes
+        .iter()
+        .map(|route| (route.name.as_str(), route))
+        .collect();
 
     if app.get_has_selected_route() {
         let selected = app.get_selected_route().name;
@@ -590,7 +653,12 @@ fn render(app: &MainWindow, state: &mut State, models: &Models, force: bool) {
                         .iter()
                         .filter(|entry| entry.route == route.name)
                         .take(6)
-                        .map(|entry| traffic_item(entry, &endpoints))
+                        .map(|entry| traffic_item(entry, &endpoints, &routes_by_name))
+                        .collect::<Vec<_>>(),
+                );
+                models.route_checkouts.set_vec(
+                    other_checkouts(route, &state.routes)
+                        .map(|other| route_item(other, &endpoints, stats.get(other.name.as_str())))
                         .collect::<Vec<_>>(),
                 );
             }
@@ -665,7 +733,7 @@ fn render(app: &MainWindow, state: &mut State, models: &Models, force: bool) {
             "errors" => entry.status >= 400,
             _ => true,
         })
-        .map(|entry| traffic_item(entry, &endpoints))
+        .map(|entry| traffic_item(entry, &endpoints, &routes_by_name))
         .collect::<Vec<_>>();
     models.traffic.set_vec(rows);
     state.shown_max_id = newest;
@@ -687,6 +755,73 @@ struct RouteStats {
     last: Option<DateTime<Utc>>,
 }
 
+/// Rows for the Routes table: grouped under a header per repository once any route
+/// carries git context, main checkouts before worktrees; flat otherwise.
+fn grouped_route_rows(
+    routes: &[&Route],
+    endpoints: &Endpoints,
+    stats: &HashMap<&str, RouteStats>,
+) -> Vec<RouteItem> {
+    let item = |route: &Route| route_item(route, endpoints, stats.get(route.name.as_str()));
+    if routes.iter().all(|route| route.git.is_none()) {
+        return routes.iter().map(|route| item(route)).collect();
+    }
+
+    let mut groups: Vec<(String, Vec<&Route>)> = Vec::new();
+    for route in routes {
+        let label = route
+            .git
+            .as_ref()
+            .map_or("Other routes", |git| git.repo_name.as_str());
+        match groups.iter_mut().find(|(name, _)| name == label) {
+            Some((_, members)) => members.push(route),
+            None => groups.push((label.to_owned(), vec![route])),
+        }
+    }
+    // Repositories alphabetically, routes without git last.
+    groups.sort_by_key(|(name, members)| (members[0].git.is_none(), name.to_lowercase()));
+
+    let mut rows = Vec::new();
+    for (name, mut members) in groups {
+        members.sort_by_key(|route| {
+            let git = route.git.as_ref();
+            (
+                git.map_or(route.name.as_str(), |git| git.base_name.as_str())
+                    .to_owned(),
+                git.is_some_and(|git| git.linked),
+                git.and_then(|git| git.branch.clone()),
+            )
+        });
+        rows.push(RouteItem {
+            header: name.into(),
+            header_count: members.len() as i32,
+            ..RouteItem::default()
+        });
+        rows.extend(members.into_iter().map(item));
+    }
+    rows
+}
+
+/// Other checkouts (main or worktrees) running the same app as `route`.
+fn other_checkouts<'a>(route: &'a Route, routes: &'a [Route]) -> impl Iterator<Item = &'a Route> {
+    let git = route.git.as_ref();
+    routes.iter().filter(move |other| {
+        other.name != route.name
+            && git.is_some_and(|git| {
+                other.git.as_ref().is_some_and(|theirs| {
+                    theirs.repo == git.repo && theirs.base_name == git.base_name
+                })
+            })
+    })
+}
+
+fn tilde_path(path: &str) -> String {
+    match std::env::var("HOME") {
+        Ok(home) if path.starts_with(&format!("{home}/")) => format!("~{}", &path[home.len()..]),
+        _ => path.to_owned(),
+    }
+}
+
 fn route_item(route: &Route, endpoints: &Endpoints, stats: Option<&RouteStats>) -> RouteItem {
     let (requests, errors, avg, last) = match stats {
         Some(s) if s.requests > 0 => (
@@ -697,10 +832,31 @@ fn route_item(route: &Route, endpoints: &Endpoints, stats: Option<&RouteStats>) 
         ),
         _ => (0, 0, String::new(), String::new()),
     };
+    let git = route.git.as_ref();
     RouteItem {
         name: route.name.clone().into(),
         url: endpoints.url(&route.hostname()).into(),
         command: route.command.clone().unwrap_or_default().into(),
+        header: SharedString::new(),
+        header_count: 0,
+        repo: git.map(|git| git.repo.clone()).unwrap_or_default().into(),
+        branch: git
+            .and_then(|git| git.branch.clone())
+            .unwrap_or_default()
+            .into(),
+        linked: git.is_some_and(|git| git.linked),
+        base_name: git
+            .map(|git| git.base_name.clone())
+            .unwrap_or_default()
+            .into(),
+        worktree: git
+            .map(|git| tilde_path(&git.worktree))
+            .unwrap_or_default()
+            .into(),
+        worktree_path: git
+            .map(|git| git.worktree.clone())
+            .unwrap_or_default()
+            .into(),
         target: format!("127.0.0.1:{}", route.port).into(),
         port: i32::from(route.port),
         project: route.project.clone().unwrap_or_default().into(),
@@ -723,7 +879,16 @@ fn route_item(route: &Route, endpoints: &Endpoints, stats: Option<&RouteStats>) 
     }
 }
 
-fn traffic_item(entry: &TrafficEntry, endpoints: &Endpoints) -> TrafficItem {
+fn traffic_item(
+    entry: &TrafficEntry,
+    endpoints: &Endpoints,
+    routes: &HashMap<&str, &Route>,
+) -> TrafficItem {
+    // Show worktree routes as their app name plus a branch badge.
+    let worktree = routes
+        .get(entry.route.as_str())
+        .and_then(|route| route.git.as_ref())
+        .filter(|git| git.linked);
     let host = entry
         .host
         .clone()
@@ -742,6 +907,13 @@ fn traffic_item(entry: &TrafficEntry, endpoints: &Endpoints) -> TrafficItem {
     TrafficItem {
         id: entry.id as i32,
         route: entry.route.clone().into(),
+        route_label: worktree
+            .map_or_else(|| entry.route.clone(), |git| git.base_name.clone())
+            .into(),
+        branch: worktree
+            .and_then(|git| git.branch.clone())
+            .unwrap_or_default()
+            .into(),
         host: host.into(),
         method: entry.method.clone().into(),
         path: entry.path.clone().into(),
@@ -958,6 +1130,29 @@ fn run_as_administrator(script: &str, prompt: &str) -> Result<(), String> {
     } else {
         Err(format!("Setup failed: {}", stderr.trim()))
     }
+}
+
+/// Opens a folder in the first installed editor. GUI apps don't inherit the shell PATH,
+/// so editors are found by bundle identifier rather than their CLI shims.
+fn open_in_editor(path: &str) -> bool {
+    const EDITORS: &[&str] = &[
+        "com.todesktop.230313mzl4w4u92", // Cursor
+        "com.microsoft.VSCode",
+        "dev.zed.Zed",
+        "com.exafunction.windsurf",
+        "com.sublimetext.4",
+    ];
+    let opened = EDITORS.iter().any(|bundle| {
+        Command::new("open")
+            .args(["-b", bundle, path])
+            .stderr(Stdio::null())
+            .status()
+            .is_ok_and(|status| status.success())
+    });
+    if !opened {
+        let _ = Command::new("open").arg(path).spawn();
+    }
+    opened
 }
 
 /// Resolves through the system resolver, exactly like a browser would.
