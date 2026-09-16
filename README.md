@@ -15,18 +15,37 @@ macOS companion shows routes, live traffic, and domains.
 
 ![Doorman's traffic inspector: live requests for a Vite app on https://site.test, filtered to one route, with a request's details and Replay, Copy URL, and cURL actions](docs/images/traffic-inspector.png)
 
-## Quick start
+## Install
 
 ```bash
-scripts/package-macos.sh        # builds outputs/Doorman-0.1.0-macos.zip (needs cargo-bundle)
-export PATH="$PWD/outputs/Doorman-0.1.0-macos/bin:$PATH"
+curl -fsSL https://getdoorman.dev/install.sh | sh
+```
 
+The installer downloads the latest universal (Apple Silicon and Intel) release, checks
+its SHA-256, installs `Doorman.app` in `/Applications`, and links the `doorman` CLI into
+`~/.local/bin`, adding it to your shell's PATH if needed. Then:
+
+```bash
 doorman setup                   # once: trust HTTPS and finish custom domains
 doorman service install         # optional: start Doorman at login
 ```
 
-From source, `cargo run -p doorman-daemon`, `cargo run -p doorman-cli -- <command>`, and
-`cargo run -p doorman-desktop` work too.
+Installer options: `DOORMAN_VERSION=0.2.0` pins a release, `DOORMAN_INSTALL_DIR` and
+`DOORMAN_BIN_DIR` change where things go, `DOORMAN_NO_MODIFY_PATH=1` leaves your shell
+profile alone, and `DOORMAN_NO_LAUNCH=1` skips opening the app.
+
+## Building from source
+
+```bash
+cargo run -p doorman-cli -- <command>   # or doorman-daemon / doorman-desktop
+cargo install --path crates/doorman-cli --locked && cargo install --path crates/doorman-daemon --locked
+scripts/package-macos.sh                # outputs/Doorman.app + Doorman-macos.zip (needs cargo-bundle)
+DOORMAN_UNIVERSAL=1 scripts/package-macos.sh   # both architectures, as releases are built
+```
+
+To release, bump `version` in `Cargo.toml` and push a matching tag (`git tag v0.2.0 && git
+push origin v0.2.0`). The release workflow tests, builds the universal app, and publishes
+`Doorman-macos.zip`, its checksum, and `install.sh` to GitHub Releases.
 
 ## Running apps
 
