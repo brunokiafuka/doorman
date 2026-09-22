@@ -1,3 +1,5 @@
+mod tunnel;
+
 use std::{
     cell::RefCell,
     collections::HashMap,
@@ -30,6 +32,7 @@ const COMMON_DEV_PORTS: &[u16] = &[
 #[derive(Default)]
 struct State {
     routes: Vec<Route>,
+    tunnels: tunnel::Manager,
     proxy_port: u16,
     endpoints: Option<Endpoints>,
     entries: Vec<TrafficEntry>,
@@ -89,6 +92,40 @@ fn main() -> Result<()> {
     {
         let refresh = refresh.clone();
         app.on_refresh(move || refresh(false));
+    }
+    {
+        let app_weak = app.as_weak();
+        let state = state.clone();
+        app.on_start_tunnel(move |name, provider| {
+            let Some(app) = app_weak.upgrade() else {
+                return;
+            };
+            // Refresh before starting so a stale selection cannot expose a former port.
+            let mut state = state.borrow_mut();
+            fetch(&app, &mut state);
+            if let Some(route) = state
+                .routes
+                .iter()
+                .find(|r| r.name == name.as_str())
+                .cloned()
+            {
+                state.tunnels.start(&route, &provider);
+                state.tunnels.render(&app);
+            } else {
+                show_toast(&app, "Route is no longer available".into());
+            }
+        });
+    }
+    {
+        let app_weak = app.as_weak();
+        let state = state.clone();
+        app.on_stop_tunnel(move |name| {
+            let mut state = state.borrow_mut();
+            state.tunnels.stop(&name);
+            if let Some(app) = app_weak.upgrade() {
+                state.tunnels.render(&app);
+            }
+        });
     }
     {
         let refresh = refresh.clone();
@@ -332,10 +369,12 @@ fn main() -> Result<()> {
     }
     {
         let app_weak = app.as_weak();
+        let state = state.clone();
         app.on_stop_route(move |route| {
             let Some(app) = app_weak.upgrade() else {
                 return;
             };
+            state.borrow_mut().tunnels.stop(&route.name);
             // The owner is the `doorman run` process; it stops the server's whole process
             // group and removes the route itself.
             let stopped = Command::new("kill")
@@ -392,7 +431,9 @@ fn main() -> Result<()> {
     {
         let refresh = refresh.clone();
         let app_weak = app.as_weak();
+        let state = state.clone();
         app.on_remove_route(move |name| {
+            state.borrow_mut().tunnels.stop(&name);
             let result = call(&Request::Remove {
                 name: name.to_string(),
             });
@@ -498,9 +539,24 @@ fn main() -> Result<()> {
         move || refresh(false)
     });
 
+    let tunnel_timer = Timer::default();
+    tunnel_timer.start(TimerMode::Repeated, Duration::from_millis(150), {
+        let app = app.as_weak();
+        let state = state.clone();
+        move || {
+            let mut state = state.borrow_mut();
+            state.tunnels.poll();
+            if let Some(app) = app.upgrade() {
+                state.tunnels.render(&app);
+            }
+        }
+    });
+
     app.show()?;
     tray.show()?;
-    slint::run_event_loop()?;
+    let result = slint::run_event_loop();
+    state.borrow_mut().tunnels.stop_all();
+    result?;
     Ok(())
 }
 
@@ -588,6 +644,9 @@ fn fetch(app: &MainWindow, state: &mut State) {
 }
 
 fn render(app: &MainWindow, state: &mut State, models: &Models, force: bool) {
+    state.tunnels.reconcile(&state.routes);
+    state.tunnels.render(app);
+    app.set_tunnel_availability(tunnel::availability().into());
     let endpoints = state.endpoints.unwrap_or(Endpoints {
         http_port: state.proxy_port,
         https_port: None,

@@ -112,6 +112,15 @@ doorman tunnel shop --provider ngrok
 doorman tunnel shop --provider cloudflare
 ```
 
+In the macOS app, select a route and use **Public tunnel** in its details. Choose
+Auto, Cloudflare, or ngrok, then **Start public tunnel**. The app runs the provider
+directly—no Terminal window—and shows status, the public URL with Copy/Open actions,
+and the latest 100 log lines.
+Use **Stop tunnel** to end it without stopping the app.
+App-owned tunnels stop on quit and when their route is stopped, removed, or replaced.
+Discovery checks `PATH`, `/opt/homebrew/bin`, `/usr/local/bin`, and `~/.local/bin`,
+including when Doorman is launched from Finder. Provider logs stay in memory.
+
 Auto-detection checks `PATH` for `cloudflared`, then `ngrok`. Cloudflare quick tunnels
 need no account; ngrok needs an account and its authtoken configured with the ngrok
 CLI. Doorman does not install clients or store credentials. Provider startup errors
