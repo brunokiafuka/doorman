@@ -24,9 +24,18 @@ for target in $targets; do
 done
 cargo bundle --release -p doorman-desktop --format osx --target "$first_target"
 
+# A missing icon glob is silently ignored by cargo-bundle. Refuse to ship an
+# app with a generic Dock/Finder icon, even if the rest of the bundle succeeded.
+bundle="target/$first_target/release/bundle/osx/Doorman.app"
+icon=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIconFile' "$bundle/Contents/Info.plist")
+if [ -z "$icon" ] || [ ! -s "$bundle/Contents/Resources/$icon" ]; then
+    echo "Missing app icon in $bundle" >&2
+    exit 1
+fi
+
 rm -rf "$app"
 mkdir -p "$out_dir"
-cp -R "target/$first_target/release/bundle/osx/Doorman.app" "$app"
+cp -R "$bundle" "$app"
 
 # The CLI and daemon live next to the app binary: the app starts the daemon from
 # there, and the installer links the CLI into the user's PATH.

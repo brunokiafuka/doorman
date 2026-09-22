@@ -31,7 +31,8 @@ jobs:
         run: cargo test --workspace --locked
 
       - name: Install cargo-bundle
-        run: cargo install cargo-bundle --locked
+        # 0.12 changed the bundle metadata schema; keep releases reproducible.
+        run: cargo install cargo-bundle --version 0.11.0 --locked
 
       - name: Package universal app
         env:
