@@ -134,6 +134,28 @@ fn main() -> Result<()> {
     {
         let app_weak = app.as_weak();
         let state = state.clone();
+        app.on_tunnel_log_filter_changed(move || {
+            if let Some(app) = app_weak.upgrade() {
+                app.set_log_view_paused(false);
+                state.borrow().tunnels.render(&app);
+            }
+        });
+    }
+    {
+        let app_weak = app.as_weak();
+        let state = state.clone();
+        app.on_clear_tunnel_logs(move || {
+            if let Some(app) = app_weak.upgrade() {
+                let mut state = state.borrow_mut();
+                state.tunnels.clear_logs(&app.get_log_route());
+                app.set_log_view_paused(false);
+                state.tunnels.render(&app);
+            }
+        });
+    }
+    {
+        let app_weak = app.as_weak();
+        let state = state.clone();
         let models = models.clone();
         app.on_filters_changed(move || {
             if let Some(app) = app_weak.upgrade() {

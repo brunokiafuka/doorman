@@ -13,6 +13,7 @@ use doorman_core::{
     Route,
     tunnel::{self, Provider},
 };
+use slint::{Model, ModelRc, SharedString, VecModel};
 
 const MAX_LOG_LINES: usize = 100;
 const MAX_LINE_BYTES: u64 = 2048;
@@ -33,7 +34,46 @@ struct Session {
     url: String,
     registered: bool,
     error: String,
-    logs: VecDeque<String>,
+    logs: VecDeque<LogLine>,
+}
+
+struct LogLine {
+    received: Instant,
+    time: String,
+    raw: String,
+}
+
+impl LogLine {
+    fn new(raw: String) -> Self {
+        Self {
+            received: Instant::now(),
+            time: chrono::Local::now().format("%H:%M:%S").to_string(),
+            raw,
+        }
+    }
+
+    fn row(&self, session: &Session) -> crate::TunnelLogItem {
+        let json = serde_json::from_str::<serde_json::Value>(&self.raw).ok();
+        let level = json
+            .as_ref()
+            .and_then(|v| v.get("level").or_else(|| v.get("lvl")))
+            .and_then(|v| v.as_str())
+            .unwrap_or("info")
+            .to_uppercase();
+        let message = json
+            .as_ref()
+            .and_then(|v| v.get("message").or_else(|| v.get("msg")))
+            .and_then(|v| v.as_str())
+            .unwrap_or(&self.raw);
+        crate::TunnelLogItem {
+            time: self.time.clone().into(),
+            level: level.into(),
+            route: session.route.name.clone().into(),
+            provider: session.provider.binary().into(),
+            message: message.into(),
+            raw: self.raw.clone().into(),
+        }
+    }
 }
 
 impl Manager {
@@ -76,6 +116,36 @@ impl Manager {
         }
     }
 
+    pub fn clear_logs(&mut self, route: &str) {
+        for session in self.sessions.values_mut() {
+            if route.is_empty() || session.route.name == route {
+                session.logs.clear();
+            }
+        }
+    }
+
+    fn connected_names(&self) -> Vec<String> {
+        let mut names: Vec<_> = self
+            .sessions
+            .values()
+            .filter(|s| s.child.is_some() && s.status == "Connected")
+            .map(|s| s.route.name.clone())
+            .collect();
+        names.sort();
+        names
+    }
+
+    fn log_rows(&self, route: &str) -> Vec<crate::TunnelLogItem> {
+        let mut lines: Vec<_> = self
+            .sessions
+            .values()
+            .filter(|s| route.is_empty() || s.route.name == route)
+            .flat_map(|s| s.logs.iter().map(move |line| (s, line)))
+            .collect();
+        lines.sort_by_key(|(_, line)| line.received);
+        lines.into_iter().map(|(s, line)| line.row(s)).collect()
+    }
+
     /// Replacing/removing a route must not leave its former port public.
     pub fn reconcile(&mut self, routes: &[Route]) {
         self.sessions.retain(|_, session| {
@@ -102,6 +172,39 @@ impl Manager {
     }
 
     pub fn render(&self, app: &crate::MainWindow) {
+        let names = self.connected_names();
+        app.set_log_route_connected(names.iter().any(|n| n == app.get_log_route().as_str()));
+        // Replacing the model destroys the chips' TouchAreas. A log refresh
+        // between pointer-down and pointer-up must not swallow the click.
+        if connected_names_changed(&app.get_connected_tunnels(), &names) {
+            app.set_connected_tunnels(ModelRc::new(VecModel::from(
+                names
+                    .into_iter()
+                    .map(Into::into)
+                    .collect::<Vec<SharedString>>(),
+            )));
+        }
+        let log_route = app.get_log_route();
+        let log_session = self.sessions.get(log_route.as_str());
+        app.set_log_view_status(log_session.map_or("Stopped", |s| &s.status).into());
+        app.set_log_view_error(log_session.map_or("", |s| &s.error).into());
+        if !app.get_log_view_paused() {
+            let rows = self.log_rows(&log_route);
+            let text = rows
+                .iter()
+                .map(|row| {
+                    format!(
+                        "{} [{}] {} · {} {}",
+                        row.time, row.level, row.route, row.provider, row.raw
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            if app.get_log_view_text().as_str() != text {
+                app.set_log_view_rows(ModelRc::new(VecModel::from(rows)));
+                app.set_log_view_text(text.into());
+            }
+        }
         let name = app.get_selected_route().name;
         let session = self.sessions.get(name.as_str());
         app.set_tunnel_active(session.is_some_and(|s| s.child.is_some()));
@@ -110,7 +213,13 @@ impl Manager {
         app.set_tunnel_error(session.map_or("", |s| &s.error).into());
         app.set_tunnel_logs(
             session
-                .map(|s| s.logs.iter().cloned().collect::<Vec<_>>().join("\n"))
+                .map(|s| {
+                    s.logs
+                        .iter()
+                        .map(|l| l.raw.clone())
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                })
                 .unwrap_or_default()
                 .into(),
         );
@@ -121,6 +230,14 @@ impl Manager {
                 .into(),
         );
     }
+}
+
+fn connected_names_changed(model: &ModelRc<SharedString>, names: &[String]) -> bool {
+    model.row_count() != names.len()
+        || model
+            .iter()
+            .zip(names)
+            .any(|(old, new)| old.as_str() != new)
 }
 
 impl Session {
@@ -184,7 +301,7 @@ impl Session {
                     self.status = "Connected".into();
                 }
             }
-            self.logs.push_back(line);
+            self.logs.push_back(LogLine::new(line));
             if self.logs.len() > MAX_LOG_LINES {
                 self.logs.pop_front();
             }
@@ -340,6 +457,23 @@ mod tests {
     use super::*;
 
     #[test]
+    fn log_refresh_preserves_unchanged_chips() {
+        let model = ModelRc::new(VecModel::from(vec!["api".into(), "shop".into()]));
+        let names = vec!["api".into(), "shop".into()];
+        assert!(!connected_names_changed(&model, &names));
+        assert!(connected_names_changed(&model, &["api".into()]));
+        assert!(connected_names_changed(
+            &model,
+            &["api".into(), "web".into()]
+        ));
+        assert!(connected_names_changed(
+            &model,
+            &["shop".into(), "api".into()]
+        ));
+        assert!(!connected_names_changed(&ModelRc::default(), &[]));
+    }
+
+    #[test]
     fn parses_only_public_provider_urls_and_readiness() {
         let cloud = parse_output(
             Provider::Cloudflare,
@@ -416,6 +550,35 @@ mod tests {
         assert!(manager.sessions["shop"].child.is_none());
         manager.reconcile(&[]);
         assert!(manager.sessions.is_empty());
+    }
+
+    #[test]
+    fn chips_only_list_connected_tunnels_and_logs_filter_and_clear() {
+        let mut manager = Manager::default();
+        let mut first = running_session();
+        first.status = "Connected".into();
+        first.logs.push_back(LogLine::new(
+            r#"{"level":"warn","message":"reconnecting"}"#.into(),
+        ));
+        manager.sessions.insert("shop".into(), first);
+        let mut second = running_session();
+        second.route.name = "api".into();
+        second
+            .logs
+            .push_back(LogLine::new("Starting provider".into()));
+        manager.sessions.insert("api".into(), second);
+        assert_eq!(manager.connected_names(), ["shop"]);
+        assert_eq!(manager.log_rows("").len(), 2);
+        let rows = manager.log_rows("shop");
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].level, "WARN");
+        assert_eq!(rows[0].message, "reconnecting");
+        manager.clear_logs("shop");
+        assert_eq!(manager.log_rows("").len(), 1);
+        manager.stop("shop");
+        assert!(manager.connected_names().is_empty());
+        manager.clear_logs("");
+        assert!(manager.log_rows("").is_empty());
     }
 
     #[test]

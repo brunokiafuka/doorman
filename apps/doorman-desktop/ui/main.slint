@@ -26,6 +26,15 @@ export struct RouteItem {
     avg-latency: string,
 }
 
+export struct TunnelLogItem {
+    time: string,
+    level: string,
+    route: string,
+    provider: string,
+    message: string,
+    raw: string,
+}
+
 export struct DomainItem {
     name: string,
     builtin: bool,
@@ -667,6 +676,16 @@ export component MainWindow inherits Window {
     in-out property <string> tunnel-availability;
     in-out property <string> tunnel-actual-provider;
     in-out property <string> tunnel-error;
+    in-out property <string> log-route;
+    in-out property <string> log-view-text;
+    in-out property <string> log-view-status;
+    in-out property <string> log-view-error;
+    in-out property <bool> log-view-paused: false;
+    in property <[string]> connected-tunnels;
+    in property <[TunnelLogItem]> log-view-rows;
+    in property <bool> log-route-connected;
+    callback clear-tunnel-logs;
+    callback tunnel-log-filter-changed;
     private property <string> tunnel-provider: "auto";
     callback reveal-path(string);
     callback open-in-editor(string);
@@ -760,6 +779,13 @@ export component MainWindow inherits Window {
                     active: root.current-tab == 2;
                     activated => { root.current-tab = 2; }
                 }
+                Tab {
+                    label: "Tunnel logs";
+                    show-count: false;
+                    active: root.current-tab == 3;
+                    activated => { root.current-tab = 3; }
+                }
+
                 Rectangle { horizontal-stretch: 1; }
 
                 VerticalLayout {
@@ -1314,23 +1340,15 @@ export component MainWindow inherits Window {
                                 font-size: 12px;
                                 wrap: word-wrap;
                             }
-                            if root.tunnel-logs != "" : VerticalLayout {
-                                spacing: 6px;
-                                SectionTitle { text: "Provider logs · latest 100 lines"; }
-                                ScrollView {
-                                    height: 160px;
-                                    content-width: self.visible-width;
-                                    VerticalLayout {
-                                        alignment: start;
-                                        Text {
-                                            text: root.tunnel-logs;
-                                            color: Theme.text-secondary;
-                                            font-family: Theme.mono;
-                                            font-size: 10px;
-                                            vertical-alignment: top;
-                                            wrap: word-wrap;
-                                        }
-                                    }
+                            Button {
+                                label: "View live logs"; icon: Icons.external;
+                                activated => {
+                                    root.log-route = root.selected-route.name;
+                                    root.log-view-status = root.tunnel-status;
+                                    root.log-view-error = root.tunnel-error;
+                                    root.log-view-paused = false;
+                                    root.tunnel-log-filter-changed();
+                                    root.current-tab = 3;
                                 }
                             }
                         }
@@ -1440,6 +1458,154 @@ export component MainWindow inherits Window {
                             if root.selected-route.pid != "" : Button { label: "Stop"; icon: Icons.stop; kind: "danger"; activated => { root.stop-route(root.selected-route); } }
                             if root.selected-route.pid == "" : Button { label: "Remove"; icon: Icons.trash; kind: "danger"; activated => { root.remove-route(root.selected-route.name); } }
                         }
+                    }
+                }
+            }
+
+            if root.current-tab == 3 : VerticalLayout {
+                spacing: 0px;
+                HorizontalLayout {
+                    height: 56px;
+                    padding-left: 20px;
+                    padding-right: 20px;
+                    spacing: 6px;
+                    VerticalLayout {
+                        alignment: center;
+                        Button {
+                            label: root.log-view-paused ? "Resume" : "Pause";
+                            icon: root.log-view-paused ? Icons.play : Icons.pause;
+                            activated => { root.log-view-paused = !root.log-view-paused; }
+                        }
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        Button {
+                            label: "Clear"; icon: Icons.clear; kind: "ghost";
+                            enabled: root.log-view-rows.length > 0;
+                            activated => { root.clear-tunnel-logs(); }
+                        }
+                    }
+                    Rectangle { width: 1px; height: 18px; y: 19px; background: Theme.border; }
+                    Rectangle { width: 6px; }
+                    Flickable {
+                        horizontal-stretch: 1;
+                        content-width: tunnel-chip-row.preferred-width;
+                        tunnel-chip-row := HorizontalLayout {
+                            spacing: 6px;
+                            padding-top: 15px;
+                            padding-bottom: 15px;
+                            Chip {
+                                label: "All tunnels";
+                                active: root.log-route == "";
+                                activated => {
+                                    root.log-route = "";
+                                    root.tunnel-log-filter-changed();
+                                }
+                            }
+                            for name in root.connected-tunnels : Chip {
+                                label: name;
+                                active: root.log-route == name;
+                                activated => {
+                                    root.log-route = name;
+                                    root.tunnel-log-filter-changed();
+                                }
+                            }
+                            if root.log-route != "" && !root.log-route-connected : Chip {
+                                label: root.log-route + " · " + root.log-view-status;
+                                active: true;
+                                activated => { root.tunnel-log-filter-changed(); }
+                            }
+                        }
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        Button {
+                            label: "Copy logs"; icon: Icons.copy; kind: "ghost";
+                            enabled: root.log-view-text != "";
+                            activated => { root.copy-text(root.log-view-text, "Provider logs copied"); }
+                        }
+                    }
+                }
+                Rectangle {
+                    height: 32px;
+                    HorizontalLayout {
+                        padding-left: 20px;
+                        padding-right: 20px;
+                        spacing: 14px;
+                        HeaderCell { width: 64px; text: "Time"; }
+                        HeaderCell { width: 52px; text: "Level"; }
+                        HeaderCell { width: 170px; text: "Route"; }
+                        HeaderCell { width: 90px; text: "Provider"; }
+                        HeaderCell { horizontal-stretch: 1; text: "Message"; }
+                    }
+                    Rectangle { y: 0; height: 1px; background: Theme.border-subtle; }
+                    Rectangle { y: parent.height - 1px; height: 1px; background: Theme.border-subtle; }
+                }
+                if root.log-view-error != "" : Text {
+                    text: root.log-view-error;
+                    color: Theme.red;
+                    font-size: 12px;
+                    wrap: word-wrap;
+                }
+                Rectangle {
+                    vertical-stretch: 1;
+                    if root.log-view-rows.length == 0 : EmptyState {
+                        icon: Icons.globe;
+                        title: "Waiting for tunnel logs";
+                        body: "Start a public tunnel from Routes. Connected tunnels appear as filter chips above.";
+                    }
+                    if root.log-view-rows.length > 0 : log-scroll := ScrollView {
+                    content-width: self.visible-width;
+                    property <string> observed-text: root.log-view-text;
+                    property <bool> paused: root.log-view-paused;
+                    changed observed-text => {
+                        if !self.paused {
+                            self.content-y = min(0px, self.visible-height - self.content-height);
+                        }
+                    }
+                    changed paused => {
+                        if !self.paused {
+                            self.content-y = min(0px, self.visible-height - self.content-height);
+                        }
+                    }
+                    VerticalLayout {
+                        alignment: start;
+                        spacing: 0px;
+                        for line in root.log-view-rows : Rectangle {
+                            height: max(36px, log-message.preferred-height + 16px);
+                            background: log-touch.has-hover ? Theme.row-hover : transparent;
+                            HorizontalLayout {
+                                padding-left: 20px;
+                                padding-right: 20px;
+                                spacing: 14px;
+                                Text { width: 64px; text: line.time; color: Theme.text-tertiary; font-family: Theme.mono; font-size: 12px; vertical-alignment: center; }
+                                Text {
+                                    width: 52px; text: line.level;
+                                    color: line.level == "ERROR" || line.level == "ERR" || line.level == "FATAL" ? Theme.red : line.level == "WARN" || line.level == "WARNING" ? Theme.amber : Theme.blue;
+                                    font-family: Theme.mono; font-size: 11px; vertical-alignment: center; overflow: elide;
+                                }
+                                Text { width: 170px; text: line.route; color: Theme.text-secondary; font-size: 12px; vertical-alignment: center; overflow: elide; }
+                                Text { width: 90px; text: line.provider; color: Theme.text-tertiary; font-size: 12px; vertical-alignment: center; }
+                                log-message := Text {
+                                    horizontal-stretch: 1; text: line.message; color: Theme.text;
+                                    font-family: Theme.mono; font-size: 12px; wrap: word-wrap; vertical-alignment: center;
+                                }
+                            }
+                            Rectangle { y: parent.height - 1px; height: 1px; background: Theme.border-subtle; }
+                            log-touch := TouchArea {
+                                clicked => { root.copy-text(line.raw, "Raw log line copied"); }
+                            }
+                        }
+                    }
+                    }
+                }
+                Rectangle {
+                    height: 30px;
+                    Rectangle { height: 1px; background: Theme.border-subtle; }
+                    HorizontalLayout {
+                        padding-left: 20px; padding-right: 20px;
+                        Text { text: "\{root.log-view-rows.length} log lines" + (root.log-view-paused ? " · paused" : " · live"); color: Theme.text-tertiary; font-size: 11px; vertical-alignment: center; horizontal-stretch: 1; }
+                        Text { text: "Click a row to copy · last 100 per tunnel kept in memory"; color: Theme.text-tertiary; font-size: 11px; vertical-alignment: center; }
                     }
                 }
             }
