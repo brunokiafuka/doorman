@@ -18,7 +18,8 @@ slint-build = "1.17"
 [package.metadata.bundle]
 name = "Doorman"
 identifier = "dev.doorman.desktop"
-icon = ["assets/doorman-tray.svg"]
+# cargo-bundle resolves icon paths from the workspace root.
+icon = ["apps/doorman-desktop/assets/doorman-app.svg"]
 category = "Developer Tool"
 short_description = "Friendly names for local apps"
 long_description = "A small desktop companion for named localhost routes."

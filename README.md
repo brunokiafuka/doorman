@@ -39,6 +39,7 @@ profile alone, and `DOORMAN_NO_LAUNCH=1` skips opening the app.
 ```bash
 cargo run -p doorman-cli -- <command>   # or doorman-daemon / doorman-desktop
 cargo install --path crates/doorman-cli --locked && cargo install --path crates/doorman-daemon --locked
+cargo install cargo-bundle --version 0.11.0 --locked  # matches release CI
 scripts/package-macos.sh                # outputs/Doorman.app + Doorman-macos.zip (needs cargo-bundle)
 DOORMAN_UNIVERSAL=1 scripts/package-macos.sh   # both architectures, as releases are built
 ```
