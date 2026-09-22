@@ -658,6 +658,16 @@ export component MainWindow inherits Window {
     callback copy-text(string, string);
     callback remove-route(string);
     callback stop-route(RouteItem);
+    callback start-tunnel(string, string);
+    callback stop-tunnel(string);
+    in-out property <bool> tunnel-active: false;
+    in-out property <string> tunnel-status: "Stopped";
+    in-out property <string> tunnel-url;
+    in-out property <string> tunnel-logs;
+    in-out property <string> tunnel-availability;
+    in-out property <string> tunnel-actual-provider;
+    in-out property <string> tunnel-error;
+    private property <string> tunnel-provider: "auto";
     callback reveal-path(string);
     callback open-in-editor(string);
     callback save-route() -> bool;
@@ -750,7 +760,6 @@ export component MainWindow inherits Window {
                     active: root.current-tab == 2;
                     activated => { root.current-tab = 2; }
                 }
-
                 Rectangle { horizontal-stretch: 1; }
 
                 VerticalLayout {
@@ -1119,6 +1128,7 @@ export component MainWindow inherits Window {
 
                         ScrollView {
                             vertical-stretch: 1;
+                            content-width: self.width;
                         VerticalLayout {
                             spacing: 20px;
                             alignment: start;
@@ -1204,6 +1214,125 @@ export component MainWindow inherits Window {
                                 value: root.selected-route.requests == 0 ? "" : root.selected-route.errors == 0 ? "\{root.selected-route.requests}" : "\{root.selected-route.requests}  ·  \{root.selected-route.errors} failed";
                             }
                             Property { key: "Avg latency"; value: root.selected-route.avg-latency; }
+                        }
+
+                        // App-owned public sharing; no Terminal or background daemon.
+                        VerticalLayout {
+                            spacing: 8px;
+                            HorizontalLayout {
+                                SectionTitle { text: "Public tunnel"; horizontal-stretch: 1; }
+                                Text {
+                                    text: root.tunnel-status + (root.tunnel-actual-provider != "" ? " · " + root.tunnel-actual-provider : "");
+                                    color: root.tunnel-status == "Connected" ? Theme.green : root.tunnel-status == "Failed" ? Theme.red : Theme.text-secondary;
+                                    font-size: 12px;
+                                }
+                            }
+                            Text {
+                                text: "Anyone with the public URL can access this app.";
+                                color: Theme.amber;
+                                font-size: 12px;
+                                wrap: word-wrap;
+                            }
+                            HorizontalLayout {
+                                spacing: 6px;
+                                for provider in [
+                                    { label: "Auto", value: "auto" },
+                                    { label: "Cloudflare", value: "cloudflare" },
+                                    { label: "ngrok", value: "ngrok" }
+                                ] : Button {
+                                    label: provider.label;
+                                    kind: root.tunnel-provider == provider.value ? "primary" : "secondary";
+                                    enabled: !root.tunnel-active;
+                                    activated => { root.tunnel-provider = provider.value; }
+                                }
+                                Rectangle { horizontal-stretch: 1; }
+                            }
+                            Text {
+                                text: root.tunnel-availability;
+                                color: Theme.text-secondary;
+                                font-size: 12px;
+                                wrap: word-wrap;
+                            }
+                            Text {
+                                text: root.tunnel-provider == "ngrok"
+                                    ? "Configure authentication once with: ngrok config add-authtoken <token>"
+                                    : "Auto prefers cloudflared. Cloudflare quick tunnels need no account.";
+                                color: Theme.text-tertiary;
+                                font-size: 11px;
+                                wrap: word-wrap;
+                            }
+                            Button {
+                                label: root.tunnel-active ? "Stop tunnel" : "Start public tunnel";
+                                icon: root.tunnel-active ? Icons.stop : Icons.globe;
+                                kind: root.tunnel-active ? "danger" : "secondary";
+                                enabled: root.tunnel-active || root.selected-route.healthy;
+                                activated => {
+                                    if root.tunnel-active {
+                                        root.stop-tunnel(root.selected-route.name);
+                                    } else {
+                                        root.start-tunnel(root.selected-route.name, root.tunnel-provider);
+                                    }
+                                }
+                            }
+                            if root.tunnel-url != "" : VerticalLayout {
+                                spacing: 6px;
+                                Text {
+                                    text: root.tunnel-url;
+                                    color: Theme.accent;
+                                    font-family: Theme.mono;
+                                    font-size: 12px;
+                                    wrap: word-wrap;
+                                }
+                                HorizontalLayout {
+                                    spacing: 6px;
+                                    Button {
+                                        label: "Copy URL"; icon: Icons.copy;
+                                        activated => { root.copy-text(root.tunnel-url, "Public URL copied"); }
+                                    }
+                                    Button {
+                                        label: "Open"; icon: Icons.external;
+                                        activated => { root.open-url(root.tunnel-url); }
+                                    }
+                                    Rectangle { horizontal-stretch: 1; }
+                                }
+                            }
+                            if !root.selected-route.healthy : Text {
+                                text: "Start the app before opening a tunnel.";
+                                color: Theme.text-secondary;
+                                font-size: 12px;
+                                wrap: word-wrap;
+                            }
+                            Text {
+                                text: "Stops when you quit Doorman or stop/remove this route. Stop before restarting an externally managed app. Tunnel traffic bypasses the inspector.";
+                                color: Theme.text-tertiary;
+                                font-size: 11px;
+                                wrap: word-wrap;
+                            }
+                            if root.tunnel-error != "" : Text {
+                                text: root.tunnel-error;
+                                color: Theme.red;
+                                font-size: 12px;
+                                wrap: word-wrap;
+                            }
+                            if root.tunnel-logs != "" : VerticalLayout {
+                                spacing: 6px;
+                                SectionTitle { text: "Provider logs · latest 100 lines"; }
+                                ScrollView {
+                                    height: 160px;
+                                    content-width: self.visible-width;
+                                    VerticalLayout {
+                                        alignment: start;
+                                        Text {
+                                            text: root.tunnel-logs;
+                                            color: Theme.text-secondary;
+                                            font-family: Theme.mono;
+                                            font-size: 10px;
+                                            vertical-alignment: top;
+                                            wrap: word-wrap;
+                                        }
+                                    }
+                                }
+                            }
                         }
 
                         // Recent traffic
