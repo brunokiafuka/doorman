@@ -4,6 +4,8 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+pub mod tunnel;
+
 /// Preferred ports. The daemon falls back to the `FALLBACK_*` ports when another
 /// process (or the OS) holds these.
 pub const DEFAULT_HTTP_PORT: u16 = 80;

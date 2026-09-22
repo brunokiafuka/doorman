@@ -102,6 +102,33 @@ doorman wildcard on             # tenant.shop.localhost falls back to shop
 
 Fixed routes and settings persist across restarts; `doorman run` routes don't.
 
+## Public tunnels
+
+Share an already-running route through an installed Cloudflare or ngrok client:
+
+```bash
+doorman tunnel shop
+doorman tunnel shop --provider ngrok
+doorman tunnel shop --provider cloudflare
+```
+
+Auto-detection checks `PATH` for `cloudflared`, then `ngrok`. Cloudflare quick tunnels
+need no account; ngrok needs an account and its authtoken configured with the ngrok
+CLI. Doorman does not install clients or store credentials. Provider startup errors
+are shown directly; an authentication failure does not silently switch providers.
+
+With the CLI, the provider prints the public URL and stays in the foreground. Ctrl-C stops the
+tunnel without stopping your app. **Anyone with the URL can access the app**: only
+share apps and data you intend to expose, and use app-level authentication where
+needed. Nothing is exposed unless you explicitly run this command.
+
+Tunnels connect directly to the selected app's loopback HTTP port, rewriting the
+Host header to its `.localhost` name. They do not expose the whole Doorman proxy or
+appear in Doorman's traffic inspector. The port is selected at startup: stop the
+tunnel when stopping/restarting the app to avoid exposing another app that reuses
+that port. Apps that generate absolute local URLs or use a fixed HMR origin may
+need their own public-URL configuration.
+
 ## HTTPS
 
 The daemon creates a local certificate authority on first start and issues a

@@ -1,6 +1,7 @@
 mod client;
 mod run;
 mod system;
+mod tunnel;
 
 use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr, TcpStream, ToSocketAddrs},
@@ -63,6 +64,14 @@ enum Command {
     },
     /// Print the URL for a route.
     Get { name: String },
+    /// Publicly expose a running route using an installed cloudflared or ngrok.
+    Tunnel {
+        /// Existing route name (see `doorman list`).
+        name: String,
+        /// Auto prefers cloudflared when both providers are installed.
+        #[arg(long, value_enum, default_value_t = tunnel::Provider::Auto)]
+        provider: tunnel::Provider,
+    },
     /// Remove a route.
     #[command(alias = "rm")]
     Remove { name: String },
@@ -173,6 +182,7 @@ fn dispatch(cli: Cli) -> Result<ExitCode> {
             pid,
         } => add(name, port, project, pid)?,
         Command::List { json } => list(json)?,
+        Command::Tunnel { name, provider } => return tunnel::run(&name, provider),
         Command::Get { name } => {
             let status = client::status()?;
             println!(
