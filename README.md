@@ -115,7 +115,9 @@ doorman tunnel shop --provider cloudflare
 In the macOS app, select a route and use **Public tunnel** in its details. Choose
 Auto, Cloudflare, or ngrok, then **Start public tunnel**. The app runs the provider
 directly—no Terminal window—and shows status, the public URL with Copy/Open actions,
-and the latest 100 log lines.
+and the latest 100 log lines. Choose **View live logs** to open the full-width
+**Tunnel logs** tab, which follows new output and offers Pause/Resume and Copy logs.
+Pausing freezes only the display; the tunnel keeps running and collecting output.
 Use **Stop tunnel** to end it without stopping the app.
 App-owned tunnels stop on quit and when their route is stopped, removed, or replaced.
 Discovery checks `PATH`, `/opt/homebrew/bin`, `/usr/local/bin`, and `~/.local/bin`,
