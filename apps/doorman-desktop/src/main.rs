@@ -1,7 +1,7 @@
 mod tunnel;
 
 use std::{
-    cell::RefCell,
+    cell::{Cell, RefCell},
     collections::HashMap,
     env,
     io::{BufRead, BufReader, Write},
@@ -21,6 +21,8 @@ use doorman_core::{
     certificate_trusted, resolver_install_script, resolver_remove_script, socket_path,
 };
 use slint::{ComponentHandle, Model, ModelRc, SharedString, Timer, TimerMode, VecModel};
+
+use slint::winit_030::{WinitWindowAccessor, winit};
 
 slint::include_modules!();
 
@@ -59,6 +61,21 @@ fn main() -> Result<()> {
     let dark = std::fs::read_to_string(&appearance_path)
         .map(|value| value.trim() != "light")
         .unwrap_or(true);
+    let native_theme = Rc::new(Cell::new(if dark {
+        winit::window::Theme::Dark
+    } else {
+        winit::window::Theme::Light
+    }));
+    let window_theme = native_theme.clone();
+    slint::BackendSelector::new()
+        .backend_name("winit".into())
+        .with_winit_window_attributes_hook(move |attributes| {
+            let attributes = attributes.with_theme(Some(window_theme.get()));
+            #[cfg(target_os = "macos")]
+            let attributes = attributes.with_transparent(true);
+            attributes
+        })
+        .select()?;
     let app = MainWindow::new()?;
     app.global::<Theme>().set_dark(dark);
     {
@@ -76,6 +93,14 @@ fn main() -> Result<()> {
             })();
             match save {
                 Ok(()) => {
+                    let theme = if dark {
+                        winit::window::Theme::Dark
+                    } else {
+                        winit::window::Theme::Light
+                    };
+                    native_theme.set(theme);
+                    app.window()
+                        .with_winit_window(|window| window.set_theme(Some(theme)));
                     app.global::<Theme>().set_dark(dark);
                 }
                 Err(error) => {
@@ -603,10 +628,65 @@ fn main() -> Result<()> {
     });
 
     app.show()?;
+    #[cfg(target_os = "macos")]
+    {
+        app.global::<Theme>().set_vibrancy_enabled(true);
+        let weak = app.as_weak();
+        slint::spawn_local(async move {
+            let Some(app) = weak.upgrade() else { return };
+            let result = match app.window().winit_window().await {
+                Ok(window) => apply_sidebar_material(window.as_ref()),
+                Err(error) => Err(error.to_string()),
+            };
+            if let Err(error) = result {
+                app.global::<Theme>().set_vibrancy_enabled(false);
+                eprintln!("Native sidebar material unavailable: {error}");
+            }
+        })?;
+    }
     tray.show()?;
     let result = slint::run_event_loop();
     state.borrow_mut().tunnels.stop_all();
     result?;
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn apply_sidebar_material(window: &winit::window::Window) -> Result<(), String> {
+    use objc2::MainThreadMarker;
+    use objc2_app_kit::{
+        NSAutoresizingMaskOptions, NSColor, NSView, NSVisualEffectBlendingMode,
+        NSVisualEffectMaterial, NSVisualEffectState, NSVisualEffectView, NSWindowOrderingMode,
+    };
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+
+    let mtm = MainThreadMarker::new().ok_or("Sidebar material needs the main thread")?;
+    let RawWindowHandle::AppKit(handle) =
+        window.window_handle().map_err(|e| e.to_string())?.as_raw()
+    else {
+        return Err("Sidebar material needs an AppKit window".into());
+    };
+    // The handle is owned by the live winit window and accessed only on the main thread.
+    // Insert a sibling behind Slint's drawing view: a child would cover its GL layer.
+    unsafe {
+        let view: &NSView = handle.ns_view.cast().as_ref();
+        if let Some(window) = view.window() {
+            window.setBackgroundColor(Some(&NSColor::clearColor()));
+            window.setTitlebarAppearsTransparent(true);
+        }
+        let parent = view.superview().ok_or("Missing window content container")?;
+        let material = NSVisualEffectView::initWithFrame(mtm.alloc(), parent.bounds());
+        material.setMaterial(NSVisualEffectMaterial::Sidebar);
+        material.setBlendingMode(NSVisualEffectBlendingMode::BehindWindow);
+        // Keep the frosted material when focus moves to an editor or another app.
+        // AppKit otherwise flattens the inactive light sidebar into an opaque fill.
+        material.setState(NSVisualEffectState::Active);
+        material.setAutoresizingMask(
+            NSAutoresizingMaskOptions::ViewWidthSizable
+                | NSAutoresizingMaskOptions::ViewHeightSizable,
+        );
+        parent.addSubview_positioned_relativeTo(&material, NSWindowOrderingMode::Below, Some(view));
+    }
     Ok(())
 }
 

@@ -71,8 +71,10 @@ export struct TrafficItem {
 
 export global Theme {
     in-out property <bool> dark: true;
+    in-out property <bool> vibrancy-enabled: false;
     out property <color> sidebar-text: dark ? #eeeeec : #30302e;
     out property <color> sidebar-muted: dark ? #c6c6c1 : #50504c;
+    out property <color> shell: vibrancy-enabled ? (dark ? #20202030 : #ffffff10) : bg;
     out property <color> bg: dark ? #202020 : #f0f0ee;
     out property <color> surface: dark ? #282828 : #fafaf8;
     out property <color> raised: dark ? #303030 : #ffffff;
@@ -690,7 +692,7 @@ export component MainWindow inherits Window {
     preferred-height: 860px;
     min-width: 1100px;
     min-height: 540px;
-    background: Theme.bg;
+    background: Theme.shell;
     default-font-size: 13px;
     default-font-family: "Geist";
     // Update on resize instead of binding layout constraints back to window width.
