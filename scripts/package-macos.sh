@@ -37,6 +37,11 @@ rm -rf "$app"
 mkdir -p "$out_dir"
 cp -R "$bundle" "$app"
 
+# Include the notices for the Lucide SVGs embedded in the desktop executable.
+mkdir -p "$app/Contents/Resources"
+cp apps/doorman-desktop/assets/lucide/LICENSE "$app/Contents/Resources/Lucide-LICENSE"
+cp apps/doorman-desktop/assets/fonts/*-OFL.txt "$app/Contents/Resources/"
+
 # The CLI and daemon live next to the app binary: the app starts the daemon from
 # there, and the installer links the CLI into the user's PATH.
 for binary in $binaries; do

@@ -55,7 +55,35 @@ struct Models {
 fn main() -> Result<()> {
     ensure_daemon();
 
+    let appearance_path = doorman_core::state_dir().join("appearance.txt");
+    let dark = std::fs::read_to_string(&appearance_path)
+        .map(|value| value.trim() != "light")
+        .unwrap_or(true);
     let app = MainWindow::new()?;
+    app.global::<Theme>().set_dark(dark);
+    {
+        let weak = app.as_weak();
+        app.on_set_dark_mode(move |dark| {
+            let Some(app) = weak.upgrade() else { return };
+            let save = (|| -> std::io::Result<()> {
+                if let Some(parent) = appearance_path.parent() {
+                    std::fs::create_dir_all(parent)?;
+                }
+                let temporary =
+                    appearance_path.with_extension(format!("{}.tmp", std::process::id()));
+                std::fs::write(&temporary, if dark { "dark\n" } else { "light\n" })?;
+                std::fs::rename(temporary, &appearance_path)
+            })();
+            match save {
+                Ok(()) => {
+                    app.global::<Theme>().set_dark(dark);
+                }
+                Err(error) => {
+                    show_toast(&app, format!("Could not save appearance: {error}").into())
+                }
+            }
+        });
+    }
     let tray = DoormanTray::new()?;
     let state = Rc::new(RefCell::new(State::default()));
     let models = Rc::new(Models {
