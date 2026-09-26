@@ -10,10 +10,15 @@ anyhow.workspace = true
 chrono.workspace = true
 doorman-core = { path = "../../crates/doorman-core" }
 serde_json.workspace = true
-slint = "1.17"
+slint = { version = "1.17", features = ["unstable-winit-030"] }
 
 [build-dependencies]
 slint-build = "1.17"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSView", "NSVisualEffectView", "NSWindow", "NSResponder", "NSGraphics", "NSColor"] }
+raw-window-handle = "0.6"
 
 [package.metadata.bundle]
 name = "Doorman"
