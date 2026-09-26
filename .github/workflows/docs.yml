@@ -28,6 +28,32 @@ jobs:
       - run: npm run check
       - run: npm run build
       - uses: actions/upload-artifact@v4
+        if: github.event_name == 'pull_request'
         with:
           name: doorman-docs
           path: docs/dist
+      - name: Upload Pages artifact
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: docs/dist
+
+  deploy:
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    concurrency:
+      group: github-pages
+      cancel-in-progress: false
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+      - name: Deploy the built site
+        id: deployment
+        uses: actions/deploy-pages@v4
