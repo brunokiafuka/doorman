@@ -1,0 +1,94 @@
+/* The same Geist faces and neutral surfaces used by the native app. */
+@font-face {
+  font-family: Geist;
+  src: url('/fonts/Geist-Regular.ttf') format('truetype');
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+}
+@font-face {
+  font-family: Geist;
+  src: url('/fonts/Geist-Medium.ttf') format('truetype');
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+}
+@font-face {
+  font-family: Geist;
+  src: url('/fonts/Geist-SemiBold.ttf') format('truetype');
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+}
+@font-face {
+  font-family: Geist;
+  src: url('/fonts/Geist-Bold.ttf') format('truetype');
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+}
+:root, ::backdrop {
+  --sl-font: Geist, system-ui, sans-serif;
+  --sl-content-width: 48rem;
+}
+:root[data-theme='dark'] {
+  --md-sys-color-primary: #a9bce1;
+  --md-sys-color-on-primary: #172b4a;
+  --md-sys-color-primary-container: #363b45;
+  --md-sys-color-on-primary-container: #d8e4fa;
+  --md-sys-color-surface: #202020;
+  --md-sys-color-surface-container-lowest: #202020;
+  --md-sys-color-surface-container-low: #242424;
+  --md-sys-color-surface-container: #282828;
+  --md-sys-color-surface-container-high: #303030;
+  --md-sys-color-surface-container-highest: #383838;
+  --md-sys-color-on-surface: #eeeeec;
+  --md-sys-color-on-surface-variant: #b5b5b0;
+  --md-sys-color-outline: #91918c;
+  --md-sys-color-outline-variant: #3a3a3a;
+}
+:root[data-theme='light'] {
+  --md-sys-color-primary: #345b94;
+  --md-sys-color-on-primary: #ffffff;
+  --md-sys-color-primary-container: #e4eaf4;
+  --md-sys-color-on-primary-container: #243e65;
+  --md-sys-color-surface: #fafaf8;
+  --md-sys-color-surface-container-lowest: #fafaf8;
+  --md-sys-color-surface-container-low: #f5f5f2;
+  --md-sys-color-surface-container: #f0f0ee;
+  --md-sys-color-surface-container-high: #eaeae7;
+  --md-sys-color-surface-container-highest: #e3e3de;
+  --md-sys-color-on-surface: #242424;
+  --md-sys-color-on-surface-variant: #565651;
+  --md-sys-color-outline: #70706a;
+  --md-sys-color-outline-variant: #d6d6d2;
+}
+.site-title { font-size: 1.125rem; font-weight: 600; letter-spacing: -.035em; }
+.site-title::before { content: none; }
+.site-title img { width: 1.8rem; height: 1.8rem; }
+.sl-markdown-content { line-height: 1.8; }
+.sl-markdown-content h2 { margin-top: 2.6rem; }
+.sl-markdown-content table { font-size: .9rem; }
+h1, h2, h3 { letter-spacing: -.025em; }
+.hero { padding-block: clamp(2.5rem, 7vw, 5.5rem) 2rem; }
+.hero h1 {
+  max-width: 17ch;
+  font-size: clamp(2.75rem, 5.2vw, 4.5rem);
+  font-weight: 600;
+  line-height: 1.08;
+  letter-spacing: -.055em;
+  text-wrap: balance;
+}
+.hero .tagline { max-width: 46ch; font-size: clamp(1.0625rem, 2vw, 1.25rem); line-height: 1.65; }
+.hero .actions { gap: .875rem; }
+:root[data-has-hero] .sl-markdown-content { max-width: 46rem; }
+:root[data-has-hero] .sl-markdown-content > p { font-size: .9375rem; max-width: 67ch; }
+:root[data-has-hero] .expressive-code { box-shadow: 0 8px 32px rgb(0 0 0 / .04); border-radius: 1rem; }
+:focus-visible { outline: 2px solid var(--sl-color-text-accent); outline-offset: 4px; }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; scroll-behavior: auto !important; transition: none !important; }
+}
+
+@media (max-width: 30rem) {
+  .hero h1 { font-size: clamp(1.75rem, 8.7vw, 2.5rem); }
+}
