@@ -9,6 +9,7 @@ build = "build.rs"
 anyhow.workspace = true
 chrono.workspace = true
 doorman-core = { path = "../../crates/doorman-core" }
+semver = "1"
 serde_json.workspace = true
 slint = { version = "1.17", features = ["unstable-winit-030"] }
 

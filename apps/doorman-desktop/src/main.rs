@@ -1,4 +1,5 @@
 mod tunnel;
+mod updates;
 
 use std::{
     cell::{Cell, RefCell},
@@ -106,6 +107,14 @@ fn main() -> Result<()> {
                 Err(error) => {
                     show_toast(&app, format!("Could not save appearance: {error}").into())
                 }
+            }
+        });
+    }
+    {
+        let weak = app.as_weak();
+        app.on_check_updates(move || {
+            if let Some(app) = weak.upgrade() {
+                check_for_updates(&app);
             }
         });
     }
@@ -491,6 +500,9 @@ fn main() -> Result<()> {
             }
         });
     }
+    app.on_open_release(|| {
+        let _ = Command::new("open").arg(updates::RELEASE_PAGE).spawn();
+    });
     app.on_open_url(|url| {
         let _ = Command::new("open").arg(url.as_str()).spawn();
     });
@@ -645,6 +657,7 @@ fn main() -> Result<()> {
         })?;
     }
     tray.show()?;
+    check_for_updates(&app);
     let result = slint::run_event_loop();
     state.borrow_mut().tunnels.stop_all();
     result?;
@@ -688,6 +701,38 @@ fn apply_sidebar_material(window: &winit::window::Window) -> Result<(), String> 
         parent.addSubview_positioned_relativeTo(&material, NSWindowOrderingMode::Below, Some(view));
     }
     Ok(())
+}
+
+fn check_for_updates(app: &MainWindow) {
+    if app.get_update_checking() {
+        return;
+    }
+    app.set_update_checking(true);
+    app.set_update_status("Checking for updates…".into());
+    let weak = app.as_weak();
+    thread::spawn(move || {
+        let result = updates::check();
+        let _ = weak.upgrade_in_event_loop(move |app| {
+            app.set_update_checking(false);
+            match result {
+                Ok(release) => {
+                    app.set_update_version(release.version.to_string().into());
+                    app.set_update_available(release.newer);
+                    app.set_update_status(if release.newer {
+                        format!("Doorman {} is available", release.version).into()
+                    } else {
+                        "You’re up to date".into()
+                    });
+                    app.set_update_checked_at(
+                        format!("Last checked at {}", Local::now().format("%H:%M")).into(),
+                    );
+                }
+                Err(_) => {
+                    app.set_update_status("Couldn’t check for updates. Please try again.".into());
+                }
+            }
+        });
+    });
 }
 
 fn ensure_daemon() {
