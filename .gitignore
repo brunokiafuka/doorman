@@ -3,3 +3,11 @@
 *.log
 
 /outputs
+
+# Documentation site
+/docs/node_modules/
+/docs/dist/
+/docs/.astro/
+/docs/public/images/
+/docs/public/install.sh
+/docs/public/fonts/
