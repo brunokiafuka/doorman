@@ -15,6 +15,18 @@ macOS companion shows routes, live traffic, and domains.
 
 ![Doorman's traffic inspector: live requests for a Vite app on https://site.test, filtered to one route, with a request's details and Replay, Copy URL, and cURL actions](docs/images/traffic-inspector.png)
 
+## Documentation site
+
+The educational documentation site lives in [`docs/`](docs/README.md), built with
+Astro Starlight and the Material Design 3 theme. It covers first-time setup, project
+integration, team onboarding, monorepos, and everyday workflows.
+
+```bash
+cd docs
+npm ci
+npm run dev
+```
+
 ## Install
 
 ```bash
