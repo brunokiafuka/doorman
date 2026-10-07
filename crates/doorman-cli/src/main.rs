@@ -95,9 +95,17 @@ enum Command {
         state: Option<String>,
     },
     /// One-time setup: trust HTTPS and finish every custom domain.
-    Setup,
+    Setup {
+        /// Browser-specific trust setup. `all` configures Firefox and the macOS keychain used by Edge.
+        #[arg(long, value_enum, default_value_t = system::Browser::All)]
+        browser: system::Browser,
+    },
     /// Trust Doorman's local certificate authority in your login keychain.
-    Trust,
+    Trust {
+        /// Browser-specific trust setup. `all` configures Firefox and the macOS keychain used by Edge.
+        #[arg(long, value_enum, default_value_t = system::Browser::All)]
+        browser: system::Browser,
+    },
     /// Start Doorman at login.
     #[command(subcommand)]
     Service(ServiceCommand),
@@ -201,8 +209,8 @@ fn dispatch(cli: Cli) -> Result<ExitCode> {
         },
         Command::Domain(command) => domain(command)?,
         Command::Wildcard { state } => wildcard(state)?,
-        Command::Setup => system::setup()?,
-        Command::Trust => system::trust()?,
+        Command::Setup { browser } => system::setup(browser)?,
+        Command::Trust { browser } => system::trust(browser)?,
         Command::Service(ServiceCommand::Install) => system::service_install()?,
         Command::Service(ServiceCommand::Uninstall) => system::service_uninstall()?,
         Command::Service(ServiceCommand::Status) => system::service_status()?,

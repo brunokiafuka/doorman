@@ -17,7 +17,14 @@ Open a new terminal after installation. Check that `~/.local/bin` is on PATH. If
 
 ## The browser does not trust HTTPS
 
-Run `doorman trust` and approve the keychain prompt. Recheck with `doorman doctor`. For Firefox, check `security.enterprise_roots.enabled`. Do not disable TLS verification as an onboarding workaround.
+Run `doorman trust` and approve the keychain prompt. Recheck with `doorman doctor`.
+Doorman enables Firefox's `security.enterprise_roots.enabled` preference for existing
+profiles. Microsoft Edge uses the macOS login keychain and is covered by the default
+setup. You can target a browser with `doorman trust --browser firefox`,
+`--browser edge`, or `--browser all`. Restart the browser after setup so it reloads
+trust settings. If no Firefox profile exists yet, enable that preference in
+`about:config` after creating one. Do not disable TLS verification as an onboarding
+workaround.
 
 ## The URL includes :3443
 

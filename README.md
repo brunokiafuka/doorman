@@ -157,9 +157,14 @@ need their own public-URL configuration.
 
 The daemon creates a local certificate authority on first start and issues a
 certificate for each host on demand (HTTP/2, 397-day leaves). `doorman trust` (also
-part of `doorman setup`) adds it to your login keychain; the desktop app offers the same
-button. Browsers are redirected from `http://` to `https://` once it's trusted. Firefox
-uses its own store unless `security.enterprise_roots.enabled` is on.
+part of `doorman setup`) adds it to your login keychain and enables Firefox's
+`security.enterprise_roots.enabled` preference for existing profiles; the desktop app
+offers the same setup. Microsoft Edge uses the macOS login keychain, so it is covered
+by the default trust setup without a separate profile import. Use
+`doorman trust --browser firefox`, `--browser edge`, or `--browser all` to select the
+browser-specific setup. Restart the browser after trusting the CA. Browsers are
+redirected from `http://` to `https://` once it's trusted. If Firefox has no profile
+yet, enable `security.enterprise_roots.enabled` in `about:config` after creating one.
 
 Doorman listens on 443 and 80 when they're free. macOS lets ordinary users bind low
 ports on the wildcard address, so no root is involved; connections from other machines

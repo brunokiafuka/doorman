@@ -19,7 +19,8 @@ use anyhow::{Context, Result};
 use chrono::{DateTime, Local, Utc};
 use doorman_core::{
     BUILTIN_DOMAIN, Domain, Endpoints, Request, ResolverStatus, Response, Route, TrafficEntry,
-    certificate_trusted, resolver_install_script, resolver_remove_script, socket_path,
+    certificate_trusted, configure_firefox_trust, resolver_install_script, resolver_remove_script,
+    socket_path,
 };
 use slint::{ComponentHandle, Model, ModelRc, SharedString, Timer, TimerMode, VecModel};
 
@@ -435,13 +436,22 @@ fn main() -> Result<()> {
                     .arg(&ca)
                     .status();
                 let trusted = certificate_trusted(ca.as_ref());
+                let firefox_profiles = if trusted {
+                    configure_firefox_trust().unwrap_or(0)
+                } else {
+                    0
+                };
                 let _ = app_weak.upgrade_in_event_loop(move |app| {
                     app.set_trusting(false);
                     app.set_ca_trusted(trusted);
                     show_toast(
                         &app,
                         if trusted {
-                            "Certificate trusted · restart open browser tabs"
+                            if firefox_profiles > 0 {
+                                "Certificate trusted · Firefox and Edge enabled; restart open tabs"
+                            } else {
+                                "Certificate trusted · Edge enabled; restart open browser tabs"
+                            }
                         } else {
                             "Certificate wasn't trusted"
                         }
