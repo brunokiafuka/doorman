@@ -4,9 +4,9 @@ description: Understand local certificate trust, fallback ports, and per-machine
 ---
 ## Start with .localhost
 
-Every route answers on `.localhost` without custom DNS setup. The daemon creates a local certificate authority on first start and issues certificates for hosts on demand. Run `doorman setup` or `doorman trust` to add trust to your login keychain. Existing Firefox profiles are configured to use trusted macOS roots as part of this step. Microsoft Edge uses that same macOS keychain.
+Every route answers on `.localhost` without custom DNS setup. The daemon creates a local certificate authority on first start and issues certificates for hosts on demand. Run `doorman setup` or `doorman trust` to add it to your login keychain. Chrome, Edge, Safari, and other Chromium browsers use that keychain.
 
-Browsers are redirected from HTTP to HTTPS once the CA is trusted. Restart the browser after setup so it reloads trust settings. A newly created Firefox profile may need `security.enterprise_roots.enabled` enabled in `about:config`. Browser-specific setup is configurable with `--browser firefox`, `--browser edge`, or `--browser all`.
+Firefox uses its own trust store. For each detected profile, Doorman reads `security.enterprise_roots.enabled` from `prefs.js` and `user.js`. It leaves the profile alone when the setting is absent or already `true`, and appends a marked block to `user.js` only when the last setting is `false`. `prefs.js` is never edited because Firefox rewrites it. If Doorman changes a profile, restart Firefox; restart browsers after setup so they reload trust settings. A machine with no Firefox profiles prints nothing about Firefox. `doorman clean` removes Doorman's block, but Firefox may keep the value it copied into `prefs.js`.
 
 Doorman prefers ports 443 and 80. If occupied, it falls back to HTTPS 3443 and HTTP 3210, and generated URLs include the port. After freeing the standard ports, run `doorman restart`.
 

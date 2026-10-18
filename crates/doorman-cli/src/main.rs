@@ -95,17 +95,9 @@ enum Command {
         state: Option<String>,
     },
     /// One-time setup: trust HTTPS and finish every custom domain.
-    Setup {
-        /// Browser-specific trust setup. `all` configures Firefox and the macOS keychain used by Edge.
-        #[arg(long, value_enum, default_value_t = system::Browser::All)]
-        browser: system::Browser,
-    },
-    /// Trust Doorman's local certificate authority in your login keychain.
-    Trust {
-        /// Browser-specific trust setup. `all` configures Firefox and the macOS keychain used by Edge.
-        #[arg(long, value_enum, default_value_t = system::Browser::All)]
-        browser: system::Browser,
-    },
+    Setup,
+    /// Trust Doorman's local certificate authority and update detected Firefox profiles.
+    Trust,
     /// Start Doorman at login.
     #[command(subcommand)]
     Service(ServiceCommand),
@@ -209,8 +201,8 @@ fn dispatch(cli: Cli) -> Result<ExitCode> {
         },
         Command::Domain(command) => domain(command)?,
         Command::Wildcard { state } => wildcard(state)?,
-        Command::Setup { browser } => system::setup(browser)?,
-        Command::Trust { browser } => system::trust(browser)?,
+        Command::Setup => system::setup()?,
+        Command::Trust => system::trust()?,
         Command::Service(ServiceCommand::Install) => system::service_install()?,
         Command::Service(ServiceCommand::Uninstall) => system::service_uninstall()?,
         Command::Service(ServiceCommand::Status) => system::service_status()?,
@@ -467,6 +459,16 @@ fn doctor() -> Result<()> {
             println!("✓ trust   local certificate authority is trusted");
         } else {
             println!("! trust   browsers will warn; run `doorman trust`");
+        }
+        let firefox = doorman_core::firefox_profiles();
+        let off = firefox
+            .iter()
+            .filter(|profile| profile.trust == doorman_core::FirefoxTrust::Off)
+            .count();
+        if off > 0 {
+            println!("! firefox {off} profile(s) ignore the keychain; run `doorman trust`");
+        } else if !firefox.is_empty() {
+            println!("✓ firefox uses the macOS keychain");
         }
     }
     match status.dns_port {

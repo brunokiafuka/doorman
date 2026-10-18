@@ -157,14 +157,22 @@ need their own public-URL configuration.
 
 The daemon creates a local certificate authority on first start and issues a
 certificate for each host on demand (HTTP/2, 397-day leaves). `doorman trust` (also
-part of `doorman setup`) adds it to your login keychain and enables Firefox's
-`security.enterprise_roots.enabled` preference for existing profiles; the desktop app
-offers the same setup. Microsoft Edge uses the macOS login keychain, so it is covered
-by the default trust setup without a separate profile import. Use
-`doorman trust --browser firefox`, `--browser edge`, or `--browser all` to select the
-browser-specific setup. Restart the browser after trusting the CA. Browsers are
-redirected from `http://` to `https://` once it's trusted. If Firefox has no profile
-yet, enable `security.enterprise_roots.enabled` in `about:config` after creating one.
+part of `doorman setup`) adds it to your login keychain; the desktop app offers the
+same setup. Chrome, Edge, Safari, and other Chromium browsers use that keychain, and
+Node can use it through `NODE_EXTRA_CA_CERTS`.
+
+Firefox uses its own trust store by default. When Firefox profiles exist, Doorman
+checks each profile's `security.enterprise_roots.enabled` setting in `prefs.js` and
+`user.js`. Profiles already using the keychain are left alone; profiles explicitly
+set to `false` get a marked preference block appended to `user.js`. A missing setting
+is left at Firefox's default. If Doorman changes a profile, restart Firefox to load
+the setting; restart browsers after trusting the CA in all cases. A machine without
+Firefox profiles prints nothing about Firefox. `doorman clean` removes only Doorman's
+marked block; Firefox may keep the setting it copied into `prefs.js`.
+
+Browsers are redirected from `http://` to `https://` once the CA is trusted. Supported
+browser families are Chrome, Edge, Safari, other Chromium browsers via the macOS
+keychain, and Firefox when `security.enterprise_roots.enabled` is enabled.
 
 Doorman listens on 443 and 80 when they're free. macOS lets ordinary users bind low
 ports on the wildcard address, so no root is involved; connections from other machines

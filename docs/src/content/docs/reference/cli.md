@@ -26,8 +26,8 @@ Use `doorman --help` or `doorman <command> --help` for built-in usage.
 
 | Command | Purpose |
 | --- | --- |
-| `doorman setup [--browser all\|firefox\|edge]` | Trust HTTPS and finish custom-domain setup |
-| `doorman trust [--browser all\|firefox\|edge]` | Trust the local CA; configure Firefox or confirm Edge's macOS keychain integration |
+| `doorman setup` | Trust HTTPS and finish custom-domain setup |
+| `doorman trust` | Trust the local CA in the macOS keychain and update Firefox profiles when needed |
 | `doorman domain add test [--no-setup]` | Register a suffix, optionally deferring resolver setup |
 | `doorman domain list` | List suffixes and setup status |
 | `doorman domain setup` | Finish resolver setup |

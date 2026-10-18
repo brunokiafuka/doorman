@@ -19,8 +19,8 @@ use anyhow::{Context, Result};
 use chrono::{DateTime, Local, Utc};
 use doorman_core::{
     BUILTIN_DOMAIN, Domain, Endpoints, Request, ResolverStatus, Response, Route, TrafficEntry,
-    certificate_trusted, configure_firefox_trust, resolver_install_script, resolver_remove_script,
-    socket_path,
+    add_trusted_certificate, certificate_trusted, enable_firefox_trust, resolver_install_script,
+    resolver_remove_script, socket_path,
 };
 use slint::{ComponentHandle, Model, ModelRc, SharedString, Timer, TimerMode, VecModel};
 
@@ -428,32 +428,45 @@ fn main() -> Result<()> {
             let app_weak = app_weak.clone();
             // macOS shows its own approval dialog; keep the window responsive meanwhile.
             thread::spawn(move || {
-                let keychain = PathBuf::from(env::var_os("HOME").unwrap_or_default())
-                    .join("Library/Keychains/login.keychain-db");
-                let _ = Command::new("/usr/bin/security")
-                    .args(["add-trusted-cert", "-r", "trustRoot", "-k"])
-                    .arg(keychain)
-                    .arg(&ca)
-                    .status();
+                let _ = add_trusted_certificate(ca.as_ref());
                 let trusted = certificate_trusted(ca.as_ref());
-                let firefox_profiles = if trusted {
-                    configure_firefox_trust().unwrap_or(0)
+                let firefox = if trusted {
+                    enable_firefox_trust()
                 } else {
-                    0
+                    Ok(0)
                 };
+                let firefox_profile_count = doorman_core::firefox_profiles().len();
                 let _ = app_weak.upgrade_in_event_loop(move |app| {
                     app.set_trusting(false);
                     app.set_ca_trusted(trusted);
+                    app.set_firefox_detected(firefox_profile_count > 0);
+                    app.set_firefox_needs_trust(trusted && firefox.is_err());
+                    app.set_firefox_trusted(
+                        trusted && firefox_profile_count > 0 && firefox.is_ok(),
+                    );
+                    app.set_firefox_trust_status(
+                        if firefox_profile_count == 0 {
+                            "No profiles detected"
+                        } else if !trusted {
+                            "Needs certificate trust"
+                        } else if firefox.is_err() {
+                            "Needs Firefox setup"
+                        } else {
+                            "Uses macOS login keychain"
+                        }
+                        .into(),
+                    );
                     show_toast(
                         &app,
-                        if trusted {
-                            if firefox_profiles > 0 {
-                                "Certificate trusted · Firefox and Edge enabled; restart open tabs"
-                            } else {
-                                "Certificate trusted · Edge enabled; restart open browser tabs"
+                        match (trusted, &firefox) {
+                            (false, _) => "Certificate wasn't trusted",
+                            (true, Err(_)) => {
+                                "Certificate trusted · couldn't update Firefox; run `doorman trust`"
                             }
-                        } else {
-                            "Certificate wasn't trusted"
+                            (true, Ok(0)) => "Certificate trusted · restart open browser tabs",
+                            (true, Ok(_)) => {
+                                "Certificate trusted · Firefox updated; restart open browser tabs"
+                            }
                         }
                         .into(),
                     );
@@ -821,6 +834,26 @@ fn fetch(app: &MainWindow, state: &mut State) {
         );
         app.set_https_enabled(endpoints.https_port.is_some());
         app.set_ca_trusted(status.ca_trusted);
+        let firefox = doorman_core::firefox_profiles();
+        let firefox_detected = !firefox.is_empty();
+        let firefox_needs_trust = firefox
+            .iter()
+            .any(|profile| profile.trust == doorman_core::FirefoxTrust::Off);
+        let firefox_status = if !firefox_detected {
+            "No profiles detected"
+        } else if firefox_needs_trust && !status.ca_trusted {
+            "Needs certificate and Firefox setup"
+        } else if firefox_needs_trust {
+            "Needs Firefox setup"
+        } else if status.ca_trusted {
+            "Uses macOS login keychain"
+        } else {
+            "Needs certificate trust"
+        };
+        app.set_firefox_detected(firefox_detected);
+        app.set_firefox_needs_trust(firefox_needs_trust);
+        app.set_firefox_trusted(status.ca_trusted && firefox_detected && !firefox_needs_trust);
+        app.set_firefox_trust_status(firefox_status.into());
         app.set_wildcard(status.wildcard);
         state.endpoints = Some(endpoints);
         state.domains = status.domains;

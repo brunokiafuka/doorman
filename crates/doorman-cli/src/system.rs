@@ -7,23 +7,15 @@ use std::{
 };
 
 use anyhow::{Context, Result, bail};
-use clap::ValueEnum;
 use doorman_core::{
-    CA_COMMON_NAME, Request, ResolverStatus, Response, ca_cert_path, certificate_trusted,
-    configure_firefox_trust, remove_firefox_trust, resolver_install_script, resolver_path,
-    state_dir,
+    CA_COMMON_NAME, Request, ResolverStatus, Response, add_trusted_certificate, ca_cert_path,
+    certificate_trusted, enable_firefox_trust, firefox_profiles, remove_firefox_trust,
+    resolver_install_script, resolver_path, state_dir,
 };
 
 use crate::client;
 
 const SERVICE_LABEL: &str = "dev.doorman.daemon";
-
-#[derive(Debug, Clone, Copy, ValueEnum)]
-pub enum Browser {
-    All,
-    Firefox,
-    Edge,
-}
 
 fn login_keychain() -> PathBuf {
     home().join("Library/Keychains/login.keychain-db")
@@ -35,7 +27,7 @@ fn home() -> PathBuf {
         .unwrap_or_default()
 }
 
-pub fn trust(browser: Browser) -> Result<()> {
+pub fn trust() -> Result<()> {
     client::ensure_running()?;
     let status = client::status()?;
     let Some(ca) = status.ca_cert else {
@@ -43,61 +35,39 @@ pub fn trust(browser: Browser) -> Result<()> {
     };
     if certificate_trusted(ca.as_ref()) {
         println!("✓ {CA_COMMON_NAME} is already trusted");
-        print_browser_status(browser)?;
+    } else {
+        println!("Adding {CA_COMMON_NAME} to your login keychain. macOS will ask you to confirm.");
+        let ok = add_trusted_certificate(ca.as_ref()).context("run security add-trusted-cert")?;
+        if !ok || !certificate_trusted(ca.as_ref()) {
+            bail!("the certificate wasn't trusted; run `doorman trust` again and approve the prompt");
+        }
+        println!(
+            "✓ Chrome, Edge, Safari, and Node (via NODE_EXTRA_CA_CERTS) now accept Doorman's HTTPS"
+        );
+    }
+    trust_firefox()
+}
+
+/// Firefox reads the keychain only while `security.enterprise_roots.enabled` is on.
+/// Says nothing when Firefox isn't installed.
+fn trust_firefox() -> Result<()> {
+    if firefox_profiles().is_empty() {
         return Ok(());
     }
-    println!("Adding {CA_COMMON_NAME} to your login keychain. macOS will ask you to confirm.");
-    let ok = Command::new("/usr/bin/security")
-        .args(["add-trusted-cert", "-r", "trustRoot", "-k"])
-        .arg(login_keychain())
-        .arg(&ca)
-        .status()
-        .context("run security add-trusted-cert")?
-        .success();
-    if !ok || !certificate_trusted(ca.as_ref()) {
-        bail!("the certificate wasn't trusted; run `doorman trust` again and approve the prompt");
-    }
-    println!(
-        "✓ macOS trust is enabled for Chrome, Microsoft Edge, Safari, and Node (via NODE_EXTRA_CA_CERTS)"
-    );
-    print_browser_status(browser)?;
-    Ok(())
-}
-
-fn print_browser_status(browser: Browser) -> Result<()> {
-    match browser {
-        Browser::All | Browser::Firefox => {
-            let profiles = configure_firefox_trust()
-                .context("configure Firefox to trust Doorman's local certificate authority")?;
-            print_firefox_status(profiles);
-        }
-        Browser::Edge => println!(
-            "✓ Microsoft Edge uses the macOS login keychain; restart open Edge tabs"
+    match enable_firefox_trust().context("enable keychain trust in Firefox")? {
+        0 => println!("✓ Firefox uses the macOS keychain; restart it to pick up the certificate"),
+        changed => println!(
+            "✓ Firefox: enabled keychain trust in {changed} profile{}; restart Firefox",
+            if changed == 1 { "" } else { "s" }
         ),
     }
-    if matches!(browser, Browser::All) {
-        println!("✓ Microsoft Edge uses the macOS login keychain; restart open Edge tabs");
-    }
     Ok(())
-}
-
-fn print_firefox_status(profiles: usize) {
-    if profiles == 0 {
-        println!(
-            "  Firefox: no profile found; enable security.enterprise_roots.enabled in about:config"
-        );
-    } else {
-        println!(
-            "✓ Firefox trust enabled for {profiles} profile{}; restart Firefox tabs",
-            if profiles == 1 { "" } else { "s" }
-        );
-    }
 }
 
 /// One stop: trust the CA, then install every missing resolver file with one sudo prompt.
-pub fn setup(browser: Browser) -> Result<()> {
+pub fn setup() -> Result<()> {
     client::ensure_running()?;
-    trust(browser)?;
+    trust()?;
 
     setup_domains()?;
 
@@ -365,7 +335,12 @@ pub fn clean() -> Result<()> {
         println!("✓ Removed {CA_COMMON_NAME} from your keychain");
     }
 
-    remove_firefox_trust().context("remove Doorman's Firefox trust setting")?;
+    if !firefox_profiles().is_empty() {
+        remove_firefox_trust().context("remove Doorman's block from Firefox's user.js")?;
+        println!(
+            "✓ Removed Doorman's block from Firefox's user.js (Firefox keeps the setting it already copied; turn off security.enterprise_roots.enabled in about:config to undo it)"
+        );
+    }
 
     if state_dir().exists() {
         std::fs::remove_dir_all(state_dir())?;

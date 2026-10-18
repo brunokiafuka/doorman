@@ -451,35 +451,108 @@ pub fn certificate_trusted(path: &Path) -> bool {
         .is_ok_and(|status| status.success())
 }
 
+/// Adds a certificate to the user's macOS login keychain.
+///
+/// The boolean is false when macOS rejected or cancelled the operation; errors
+/// are reserved for failing to start or wait for the `security` command.
+pub fn add_trusted_certificate(path: &Path) -> std::io::Result<bool> {
+    let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
+    let keychain = home.join("Library/Keychains/login.keychain-db");
+    Ok(std::process::Command::new("/usr/bin/security")
+        .args(["add-trusted-cert", "-r", "trustRoot", "-k"])
+        .arg(keychain)
+        .arg(path)
+        .status()?
+        .success())
+}
+
+const FIREFOX_PREF_NAME: &str = "security.enterprise_roots.enabled";
 const FIREFOX_PREF_START: &str = "// Doorman: begin Firefox trust";
 const FIREFOX_PREF_END: &str = "// Doorman: end Firefox trust";
 const FIREFOX_PREF: &str = r#"user_pref("security.enterprise_roots.enabled", true);"#;
 
-/// Enables Firefox to use the trusted macOS roots for existing profiles.
-///
-/// Chrome reads the login keychain directly, while Firefox normally uses its own
-/// NSS trust store. Writing a small managed block to `user.js` is the same as
-/// enabling `security.enterprise_roots.enabled` in `about:config`, but makes
-/// `doorman trust` work without asking users to find a browser-specific setting.
-/// The block is deliberately marked so `doorman clean` can remove only what
-/// Doorman added.
-pub fn configure_firefox_trust() -> std::io::Result<usize> {
-    let Some(home) = std::env::var_os("HOME").map(PathBuf::from) else {
-        return Ok(0);
-    };
-    let profiles = firefox_profile_paths(&home);
-    for profile in &profiles {
-        let path = profile.join("user.js");
-        let current = fs::read_to_string(&path).unwrap_or_default();
-        let updated = add_firefox_trust_block(&current);
-        if updated != current {
-            fs::write(path, updated)?;
-        }
-    }
-    Ok(profiles.len())
+/// Whether a Firefox profile reads trusted roots from the macOS keychain.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FirefoxTrust {
+    /// Never set in this profile, so Firefox's built-in default applies.
+    Default,
+    On,
+    Off,
 }
 
-/// Removes the preference block written by [`configure_firefox_trust`].
+pub struct FirefoxProfile {
+    pub path: PathBuf,
+    pub trust: FirefoxTrust,
+}
+
+/// Every Firefox profile for this user, with its current keychain-trust setting.
+pub fn firefox_profiles() -> Vec<FirefoxProfile> {
+    let Some(home) = std::env::var_os("HOME").map(PathBuf::from) else {
+        return Vec::new();
+    };
+    firefox_profile_paths(&home)
+        .into_iter()
+        .map(|path| FirefoxProfile {
+            trust: firefox_profile_trust(&path),
+            path,
+        })
+        .collect()
+}
+
+/// Turns keychain trust on in every profile that has it switched off, by adding a
+/// marked block to `user.js`. Returns how many profiles changed.
+///
+/// Firefox rewrites `prefs.js` on exit, so `user.js` is the only file that is safe
+/// to edit while Firefox is running.
+pub fn enable_firefox_trust() -> std::io::Result<usize> {
+    let mut changed = 0;
+    for profile in firefox_profiles() {
+        if profile.trust != FirefoxTrust::Off {
+            continue;
+        }
+        let path = profile.path.join("user.js");
+        let current = fs::read_to_string(&path).unwrap_or_default();
+        fs::write(&path, add_firefox_trust_block(&current))?;
+        changed += 1;
+    }
+    Ok(changed)
+}
+
+fn firefox_profile_trust(profile: &Path) -> FirefoxTrust {
+    let read = |name: &str| {
+        fs::read_to_string(profile.join(name))
+            .ok()
+            .and_then(|contents| firefox_pref_value(&contents))
+    };
+    // Firefox applies user.js on top of prefs.js at startup, so it wins.
+    match read("user.js").or_else(|| read("prefs.js")) {
+        Some(true) => FirefoxTrust::On,
+        Some(false) => FirefoxTrust::Off,
+        None => FirefoxTrust::Default,
+    }
+}
+
+/// The value of the last `user_pref("security.enterprise_roots.enabled", ...);` line.
+/// Later lines override earlier ones, so only the last one counts.
+fn firefox_pref_value(contents: &str) -> Option<bool> {
+    contents.lines().rev().find_map(|line| {
+        let rest = line.trim().strip_prefix("user_pref(")?.trim_start();
+        let rest = rest.strip_prefix('"')?.strip_prefix(FIREFOX_PREF_NAME)?;
+        let value = rest.strip_prefix('"')?.trim_start().strip_prefix(',')?;
+        let value = value
+            .trim()
+            .strip_suffix(';')?
+            .trim_end()
+            .strip_suffix(')')?;
+        match value.trim() {
+            "true" => Some(true),
+            "false" => Some(false),
+            _ => None,
+        }
+    })
+}
+
+/// Removes the preference block written by [`enable_firefox_trust`].
 /// Existing Firefox preferences are left untouched.
 pub fn remove_firefox_trust() -> std::io::Result<()> {
     let Some(home) = std::env::var_os("HOME").map(PathBuf::from) else {
@@ -550,19 +623,14 @@ fn firefox_profile_paths(home: &Path) -> Vec<PathBuf> {
 }
 
 fn add_firefox_trust_block(contents: &str) -> String {
-    if contents.lines().any(|line| line.trim() == FIREFOX_PREF) {
-        return contents.to_owned();
-    }
-    let mut updated = contents.to_owned();
+    // Drop any earlier Doorman block so the new one is the last word in the file.
+    let mut updated = remove_firefox_trust_block(contents);
     if !updated.is_empty() && !updated.ends_with('\n') {
         updated.push('\n');
     }
-    updated.push_str(FIREFOX_PREF_START);
-    updated.push('\n');
-    updated.push_str(FIREFOX_PREF);
-    updated.push('\n');
-    updated.push_str(FIREFOX_PREF_END);
-    updated.push('\n');
+    updated.push_str(&format!(
+        "{FIREFOX_PREF_START}\n{FIREFOX_PREF}\n{FIREFOX_PREF_END}\n"
+    ));
     updated
 }
 
@@ -757,10 +825,68 @@ mod tests {
     }
 
     #[test]
-    fn does_not_duplicate_an_existing_firefox_preference() {
-        let original = "user_pref(\"security.enterprise_roots.enabled\", true);\n";
-        assert_eq!(add_firefox_trust_block(original), original);
-        assert_eq!(remove_firefox_trust_block(original), original);
-        assert_eq!(remove_firefox_trust_block("custom preference"), "custom preference");
+    fn reads_the_last_firefox_preference_line() {
+        let on = "user_pref(\"security.enterprise_roots.enabled\", true);\n";
+        let off = "user_pref(\"security.enterprise_roots.enabled\", false);\n";
+        assert_eq!(firefox_pref_value("user_pref(\"browser.startup.page\", 1);\n"), None);
+        assert_eq!(firefox_pref_value(on), Some(true));
+        assert_eq!(firefox_pref_value(&format!("{on}{off}")), Some(false));
+        assert_eq!(firefox_pref_value(&format!("// {on}")), None);
+    }
+
+    #[test]
+    fn firefox_block_overrides_an_earlier_false_and_is_not_duplicated() {
+        let off = "user_pref(\"security.enterprise_roots.enabled\", false);\n";
+        let once = add_firefox_trust_block(off);
+        assert_eq!(firefox_pref_value(&once), Some(true));
+        assert_eq!(add_firefox_trust_block(&once), once);
+        assert_eq!(remove_firefox_trust_block(&once), off);
+        assert_eq!(remove_firefox_trust_block(&add_firefox_trust_block("")), "");
+    }
+
+    #[test]
+    fn reads_firefox_trust_from_a_profile_directory() {
+        let dir = std::env::temp_dir().join(format!("doorman-ff-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        assert_eq!(firefox_profile_trust(&dir), FirefoxTrust::Default);
+        fs::write(
+            dir.join("prefs.js"),
+            "user_pref(\"security.enterprise_roots.enabled\", false);\n",
+        )
+        .unwrap();
+        assert_eq!(firefox_profile_trust(&dir), FirefoxTrust::Off);
+        fs::write(dir.join("user.js"), add_firefox_trust_block("")).unwrap();
+        assert_eq!(firefox_profile_trust(&dir), FirefoxTrust::On);
+        fs::write(
+            dir.join("user.js"),
+            "user_pref(\"security.enterprise_roots.enabled\", true);\nuser_pref(\"security.enterprise_roots.enabled\", false);\n",
+        )
+        .unwrap();
+        assert_eq!(firefox_profile_trust(&dir), FirefoxTrust::Off);
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn finds_relative_and_absolute_firefox_profiles() {
+        let home = std::env::temp_dir().join(format!("doorman-ff-paths-{}", std::process::id()));
+        let firefox = home.join("Library/Application Support/Firefox");
+        let relative = firefox.join("Profiles/relative");
+        let absolute = std::env::temp_dir().join(format!("doorman-ff-absolute-{}", std::process::id()));
+        fs::create_dir_all(&relative).unwrap();
+        fs::create_dir_all(&absolute).unwrap();
+        fs::write(
+            firefox.join("profiles.ini"),
+            format!(
+                "[Profile0]\nIsRelative=1\nPath=Profiles/relative\n[Profile1]\nIsRelative=0\nPath={}\n",
+                absolute.display()
+            ),
+        )
+        .unwrap();
+
+        let profiles = firefox_profile_paths(&home);
+        assert_eq!(profiles, vec![absolute.clone(), relative]);
+
+        fs::remove_dir_all(home).unwrap();
+        fs::remove_dir_all(absolute).unwrap();
     }
 }
