@@ -8,7 +8,8 @@ use std::{
 
 use anyhow::{Context, Result, bail};
 use doorman_core::{
-    CA_COMMON_NAME, Request, ResolverStatus, Response, ca_cert_path, certificate_trusted,
+    CA_COMMON_NAME, Request, ResolverStatus, Response, add_trusted_certificate, ca_cert_path,
+    certificate_trusted, enable_firefox_trust, firefox_profiles, remove_firefox_trust,
     resolver_install_script, resolver_path, state_dir,
 };
 
@@ -34,23 +35,32 @@ pub fn trust() -> Result<()> {
     };
     if certificate_trusted(ca.as_ref()) {
         println!("✓ {CA_COMMON_NAME} is already trusted");
+    } else {
+        println!("Adding {CA_COMMON_NAME} to your login keychain. macOS will ask you to confirm.");
+        let ok = add_trusted_certificate(ca.as_ref()).context("run security add-trusted-cert")?;
+        if !ok || !certificate_trusted(ca.as_ref()) {
+            bail!("the certificate wasn't trusted; run `doorman trust` again and approve the prompt");
+        }
+        println!(
+            "✓ Chrome, Edge, Safari, and Node (via NODE_EXTRA_CA_CERTS) now accept Doorman's HTTPS"
+        );
+    }
+    trust_firefox()
+}
+
+/// Firefox reads the keychain only while `security.enterprise_roots.enabled` is on.
+/// Says nothing when Firefox isn't installed.
+fn trust_firefox() -> Result<()> {
+    if firefox_profiles().is_empty() {
         return Ok(());
     }
-    println!("Adding {CA_COMMON_NAME} to your login keychain. macOS will ask you to confirm.");
-    let ok = Command::new("/usr/bin/security")
-        .args(["add-trusted-cert", "-r", "trustRoot", "-k"])
-        .arg(login_keychain())
-        .arg(&ca)
-        .status()
-        .context("run security add-trusted-cert")?
-        .success();
-    if !ok || !certificate_trusted(ca.as_ref()) {
-        bail!("the certificate wasn't trusted; run `doorman trust` again and approve the prompt");
+    match enable_firefox_trust().context("enable keychain trust in Firefox")? {
+        0 => println!("✓ Firefox uses the macOS keychain; restart it to pick up the certificate"),
+        changed => println!(
+            "✓ Firefox: enabled keychain trust in {changed} profile{}; restart Firefox",
+            if changed == 1 { "" } else { "s" }
+        ),
     }
-    println!("✓ Browsers and Node (via NODE_EXTRA_CA_CERTS) now accept Doorman's HTTPS");
-    println!(
-        "  Firefox keeps its own store: enable security.enterprise_roots.enabled in about:config"
-    );
     Ok(())
 }
 
@@ -323,6 +333,13 @@ pub fn clean() -> Result<()> {
             }
         }
         println!("✓ Removed {CA_COMMON_NAME} from your keychain");
+    }
+
+    if !firefox_profiles().is_empty() {
+        remove_firefox_trust().context("remove Doorman's block from Firefox's user.js")?;
+        println!(
+            "✓ Removed Doorman's block from Firefox's user.js (Firefox keeps the setting it already copied; turn off security.enterprise_roots.enabled in about:config to undo it)"
+        );
     }
 
     if state_dir().exists() {

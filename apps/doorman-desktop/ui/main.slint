@@ -426,6 +426,48 @@ component SectionTitle inherits Text {
     letter-spacing: 0.4px;
 }
 
+component BrowserTrustRow inherits Rectangle {
+    in property <string> browser;
+    in property <string> detail;
+    // trusted | needs | unavailable
+    in property <string> state: "needs";
+    height: 42px;
+    border-radius: 7px;
+    border-width: 1px;
+    border-color: Theme.border-subtle;
+    background: Theme.bg;
+
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 12px;
+        spacing: 9px;
+        VerticalLayout {
+            alignment: center;
+            Dot {
+                tint: root.state == "trusted" ? Theme.green
+                    : root.state == "unavailable" ? Theme.text-tertiary : Theme.amber;
+            }
+        }
+        Text {
+            text: root.browser;
+            color: Theme.text;
+            font-size: 13px;
+            font-weight: 500;
+            vertical-alignment: center;
+        }
+        Text {
+            horizontal-stretch: 1;
+            text: root.detail;
+            color: root.state == "trusted" ? Theme.green
+                : root.state == "unavailable" ? Theme.text-tertiary : Theme.amber;
+            font-size: 12px;
+            vertical-alignment: center;
+            horizontal-alignment: right;
+            overflow: elide;
+        }
+    }
+}
+
 component Input inherits Rectangle {
     in-out property <string> text;
     in property <string> placeholder;
@@ -710,6 +752,10 @@ export component MainWindow inherits Window {
     in property <bool> https-enabled;
     in property <bool> ca-trusted;
     in property <bool> trusting;
+    in property <bool> firefox-detected: false;
+    in property <bool> firefox-trusted: false;
+    in property <bool> firefox-needs-trust: false;
+    in property <string> firefox-trust-status: "No profiles detected";
     in property <bool> wildcard;
     in property <string> version: "0.1.0";
 
@@ -920,7 +966,7 @@ export component MainWindow inherits Window {
                         Rectangle { y: parent.height - 1px; height: 1px; background: Theme.border; }
                     }
 
-                    if root.daemon-online && root.https-enabled && !root.ca-trusted : Rectangle {
+                    if root.daemon-online && root.https-enabled && (!root.ca-trusted || root.firefox-needs-trust) : Rectangle {
                         height: 44px;
                         background: Theme.warning-bg;
                         HorizontalLayout {
@@ -930,7 +976,7 @@ export component MainWindow inherits Window {
                             VerticalLayout { alignment: center; Dot { tint: Theme.amber; } }
                             Text {
                                 horizontal-stretch: 1;
-                                text: "Doorman's HTTPS certificate isn't trusted yet, so browsers will show a warning.";
+                                text: !root.ca-trusted ? "Doorman's HTTPS certificate isn't trusted yet, so browsers will show a warning." : "Firefox isn't using the macOS keychain yet.";
                                 color: Theme.amber;
                                 font-size: 12px;
                                 vertical-alignment: center;
@@ -939,7 +985,7 @@ export component MainWindow inherits Window {
                             VerticalLayout {
                                 alignment: center;
                                 Button {
-                                    label: root.trusting ? "Waiting for approval…" : "Trust certificate";
+                                    label: root.trusting ? "Waiting for approval…" : root.ca-trusted ? "Update browser trust" : "Trust certificate";
                                     kind: "primary";
                                     enabled: !root.trusting;
                                     activated => { root.trust-ca(); }
@@ -995,8 +1041,10 @@ export component MainWindow inherits Window {
                             }
                         }
 
-                        if root.current-tab == 4 : VerticalLayout {
-                            padding: 28px;
+                        if root.current-tab == 4 : ScrollView {
+                            vertical-stretch: 1;
+                            VerticalLayout {
+                                padding: 28px;
                             spacing: 16px;
                             alignment: start;
                             Text { text: "Appearance"; color: Theme.text; font-size: 17px; font-weight: 600; }
@@ -1006,6 +1054,32 @@ export component MainWindow inherits Window {
                                 alignment: start;
                                 Button { label: Theme.dark ? "Light" : "Light · selected"; kind: Theme.dark ? "secondary" : "primary"; activated => { root.set-dark-mode(false); } }
                                 Button { label: Theme.dark ? "Dark · selected" : "Dark"; kind: Theme.dark ? "primary" : "secondary"; activated => { root.set-dark-mode(true); } }
+                            }
+                            Rectangle { height: 1px; background: Theme.border-subtle; }
+                            Text { text: "Trusted browsers"; color: Theme.text; font-size: 17px; font-weight: 600; }
+                            Text { text: "Chrome, Edge, Safari, and other Chromium browsers use the macOS login keychain. Firefox uses it when its enterprise-roots preference is enabled."; color: Theme.text-secondary; font-size: 13px; wrap: word-wrap; }
+                            VerticalLayout {
+                                spacing: 8px;
+                                BrowserTrustRow {
+                                    browser: "Chrome";
+                                    detail: root.ca-trusted ? "Uses macOS login keychain" : "Needs certificate trust";
+                                    state: root.ca-trusted ? "trusted" : "needs";
+                                }
+                                BrowserTrustRow {
+                                    browser: "Edge";
+                                    detail: root.ca-trusted ? "Uses macOS login keychain" : "Needs certificate trust";
+                                    state: root.ca-trusted ? "trusted" : "needs";
+                                }
+                                BrowserTrustRow {
+                                    browser: "Safari";
+                                    detail: root.ca-trusted ? "Uses macOS login keychain" : "Needs certificate trust";
+                                    state: root.ca-trusted ? "trusted" : "needs";
+                                }
+                                BrowserTrustRow {
+                                    browser: "Firefox";
+                                    detail: root.firefox-trust-status;
+                                    state: !root.firefox-detected ? "unavailable" : root.firefox-trusted ? "trusted" : "needs";
+                                }
                             }
                             Rectangle { height: 1px; background: Theme.border-subtle; }
                             Text { text: "Updates"; color: Theme.text; font-size: 17px; font-weight: 600; }
@@ -1018,8 +1092,8 @@ export component MainWindow inherits Window {
                                 if root.update-available : Button { label: "View release"; icon: Icons.external; kind: "primary"; activated => { root.open-release(); } }
                             }
                             Text { text: root.update-checked-at; color: Theme.text-tertiary; font-size: 12px; }
-                            Text { text: "Checks on launch. Updates are downloaded from GitHub."; color: Theme.text-secondary; font-size: 12px; }
-
+                                Text { text: "Checks on launch. Updates are downloaded from GitHub."; color: Theme.text-secondary; font-size: 12px; }
+                            }
                         }
 
                         // ── Routes tab ─────────────────────────────────────────

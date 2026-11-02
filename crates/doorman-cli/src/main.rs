@@ -96,7 +96,7 @@ enum Command {
     },
     /// One-time setup: trust HTTPS and finish every custom domain.
     Setup,
-    /// Trust Doorman's local certificate authority in your login keychain.
+    /// Trust Doorman's local certificate authority and update detected Firefox profiles.
     Trust,
     /// Start Doorman at login.
     #[command(subcommand)]
@@ -459,6 +459,16 @@ fn doctor() -> Result<()> {
             println!("✓ trust   local certificate authority is trusted");
         } else {
             println!("! trust   browsers will warn; run `doorman trust`");
+        }
+        let firefox = doorman_core::firefox_profiles();
+        let off = firefox
+            .iter()
+            .filter(|profile| profile.trust == doorman_core::FirefoxTrust::Off)
+            .count();
+        if off > 0 {
+            println!("! firefox {off} profile(s) ignore the keychain; run `doorman trust`");
+        } else if !firefox.is_empty() {
+            println!("✓ firefox uses the macOS keychain");
         }
     }
     match status.dns_port {

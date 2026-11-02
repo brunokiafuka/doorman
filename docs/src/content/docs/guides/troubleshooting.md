@@ -17,7 +17,16 @@ Open a new terminal after installation. Check that `~/.local/bin` is on PATH. If
 
 ## The browser does not trust HTTPS
 
-Run `doorman trust` and approve the keychain prompt. Recheck with `doorman doctor`. For Firefox, check `security.enterprise_roots.enabled`. Do not disable TLS verification as an onboarding workaround.
+Run `doorman trust` and approve the keychain prompt. Recheck with `doorman doctor`.
+Chrome, Edge, Safari, and other Chromium browsers use the macOS login keychain. For
+each existing Firefox profile, Doorman reads the last
+`security.enterprise_roots.enabled` setting from `prefs.js` and `user.js`. It writes
+to `user.js` only when the setting is explicitly `false`; absent and `true` settings
+are left alone. Firefox profiles are discovered from `profiles.ini`, including
+profiles outside the default directory. Restart browsers after setup so they reload
+trust settings. `doorman clean` removes Doorman's marked Firefox block, but Firefox
+may keep the copied setting in `prefs.js`. Do not disable TLS verification as an
+onboarding workaround.
 
 ## The URL includes :3443
 
